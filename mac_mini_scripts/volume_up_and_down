@@ -1,0 +1,7 @@
+# To increment volume by 10%
+ 
+osascript -e "set volume output volume (output volume of (get volume settings) + 10) --100%"
+
+# To decrease volume by 10%
+
+osascript -e "set volume output volume (output volume of (get volume settings) - 10) --100%"

@@ -1,0 +1,3 @@
+#!/bin/sh
+radiotray &
+conky -c ~/.conky/conkyrt & 

@@ -1,0 +1,19 @@
+#!/bin/bash
+
+high=$(xrandr | grep 'VGA-1 connected 1680x1050' | cut -c 1-25)
+low=$(xrandr | grep 'VGA-1 connected 1440x900' | cut -c 1-24)
+
+if [ "$high" == "VGA-1 connected 1680x1050" ]; then 
+#echo "1"
+xrandr -s 1440x900 # && sed -i 's/^//' ~/.conky/conkyrc
+fi
+
+if [ "$low" == "VGA-1 connected 1440x900" ]; then 
+#echo "1"
+xrandr -s 1680x1050 # && sed -i 's/^//' ~/.conky/conkyrc
+fi
+
+
+
+
+

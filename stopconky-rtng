@@ -1,0 +1,2 @@
+#!/bin/sh
+ps -ef | grep conky-rtng | grep -v grep | awk '{print $2}' | xargs kill

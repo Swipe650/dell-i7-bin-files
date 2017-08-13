@@ -1,0 +1,34 @@
+# Maintainer: swipe
+
+pkgname=radiotray-ng
+pkgver=0.1.7
+pkgrel=2
+pkgdesc="An Internet radio player for Linux"
+arch=('i686' 'x86_64')
+url="https://github.com/ebruck/radiotray-ng"
+license=('GPL')
+depends=('boost-libs' 'curl' 'gstreamer' 'jsoncpp' 'libappindicator-gtk2'
+         'libbsd' 'libnotify' 'libxdg-basedir' 'glibmm' 'libappindicator-gtk3')
+makedepends=('cmake' 'boost' 'lsb-release')
+optdepends=('python2-lxml: Convert radiotray bookmarks to radiotray-ng format')
+options=('!libtool')
+#source=("${pkgname}.tar.gz::https://github.com/ebruck/radiotray-ng/archive/v${pkgver}.tar.gz")
+
+source=("${pkgname}.tar.gz::https://github.com/ebruck/radiotray-ng/archive/v${pkgver}-dev.tar.gz")
+
+sha256sums=('65a42385594dadb27b7445cd1559ef2fe0bd95960e93386dc015d6f0a2ecd4ed')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}-dev"
+  [ -d build ] && rm -r build
+  mkdir build
+  cd build
+
+  cmake .. -DCMAKE_BUILD_TYPE=Release
+  make
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}-dev/build"
+  make DESTDIR="$pkgdir" install
+}

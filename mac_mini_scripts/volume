@@ -1,0 +1,6 @@
+# usage: To mute for 120 secs:
+# volume 120
+ 
+osascript -e "set volume with output muted"
+sleep $1
+osascript -e "set volume without output muted"

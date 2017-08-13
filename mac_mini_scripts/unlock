@@ -1,0 +1,3 @@
+osascript -e 'tell application "system events" to keystroke return'
+osascript -e 'tell application "system events" to keystroke "password"'
+osascript -e 'tell application "system events" to keystroke return'
