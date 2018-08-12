@@ -35,14 +35,17 @@
 .config/chromium
 .config/opera
 .config/Google Play Music Desktop Player
+.config/VirtualBox
+.protonvpn-cli
 Downloads
 Games
 backups
-Documents
+#Documents
 logs
 Dropbox
 Videos
 Podcasts
+VirtualBox VMs
 .local/share/RecentDocuments
 .local/share/akonadi
 .local/share/baloo
