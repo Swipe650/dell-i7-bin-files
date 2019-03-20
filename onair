@@ -1,0 +1,4 @@
+#!/bin/bash
+
+onair=$(curl -s https://www.lbc.co.uk | xmllint --html --nowarning --xpath '//section/div/span/a[1]/text()' - | tail -c 25)
+echo $onair
