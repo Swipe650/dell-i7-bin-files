@@ -13,7 +13,7 @@ rename_muted () { if [ -f "$HOME/.conky/muted.png" ]; then { mv "$HOME/.conky/mu
 run_toggle_mute3_rtng_f6()
 {  
    currenttime=$(date +%M)
-   if [[ "$currenttime" > "00" ]] && [[ "$currenttime" < "06" ]]; then
+   if [[ "$currenttime" > "00" ]] && [[ "$currenttime" < "07" ]]; then
      ~/bin/toggle_mute3_rtng_f6 30 && exit
    fi
 }
