@@ -1,0 +1,54 @@
+#!/bin/bash
+
+mute () { "$HOME/bin/mute_radiotray-ng" -m /usr/bin/radiotray-ng && rename_xmuted; }
+unmute () { "$HOME/bin/mute_radiotray-ng" -u /usr/bin/radiotray-ng && rename_muted; }
+# high_vol () { "$HOME/bin/mute_radiotray-ng" -h /usr/bin/radiotray-ng; }
+# low_vol () { "$HOME/bin/mute_radiotray-ng" -l /usr/bin/radiotray-ng; }
+# peep () { sleep 0.75; }
+rename_xmuted () { if [ -f "$HOME/.conky/xmuted.png" ]; then { mv "$HOME/.conky/xmuted.png" "$HOME/.conky/muted.png"; } fi }
+rename_muted () { if [ -f "$HOME/.conky/muted.png" ]; then { mv "$HOME/.conky/muted.png" "$HOME/.conky/xmuted.png"; } fi }
+
+mute
+
+qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 0
+
+function get_adbreak_length() 
+
+{
+
+#Get stream metadata
+ffprobe http://media-ice.musicradio.com:80/LBCUK &> "$HOME/stream.txt"
+
+#Cut six digit adbreak length from metadata file
+adbreaklength=$(printf '%s' | awk -v RS='[[:blank:]]' '/^ADBREAK_LENGTH_/' "$HOME/stream.txt" | cut -c16-21)
+
+#Remove any leading 0 digits
+adbreaklength=$((10#$adbreaklength + 1))
+
+#Set as integer and convert from ms to seconds
+declare -i ms=$adbreaklength
+declare -i value=("$ms"/1000)
+
+echo "$value"
+
+}
+
+
+seconds=$(get_adbreak_length)
+
+until [ "$seconds" -gt 0 ]
+do 
+    get_adbreak_length
+    seconds=$(get_adbreak_length)
+    sleep 5
+done
+
+
+#echo "$seconds"
+
+~/.conky/conkytimer $seconds &
+sleep "$seconds"
+
+unmute
+
+qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 60
