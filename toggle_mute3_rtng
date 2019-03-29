@@ -14,7 +14,7 @@ run_toggle_mute3_rtng_f6()
 {  
    currenttime=$(date +%M)
    if [[ "$currenttime" > "00" ]] && [[ "$currenttime" < "06" ]]; then
-     ~/bin/toggle_mute3_rtng_f6 30
+     ~/bin/toggle_mute3_rtng_f6 3
    fi
 }
 
