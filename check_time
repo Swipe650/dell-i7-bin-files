@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# check if time is between top of the hour and 6 minutes
+run_toggle_mute3_rtng_f6()
+{  
+   currenttime=$(date +%M)
+   if [[ "$currenttime" > "00" ]] && [[ "$currenttime" < "06" ]]; then
+     ~/bin/toggle_mute3_rtng_f6 30
+   fi
+}
+
+
+# check if the current time is within the top of the hour ad break time schedule
+check_time()
+{  
+   currenttime=$(date +%H:%M)
+   if [[ "$currenttime" > "06:00" ]] && [[ "$currenttime" < "13:15" ]]; then
+     run_toggle_mute3_rtng_f6 && exit
+   fi
+}
+
+check_time
+
+echo "rest of script"
