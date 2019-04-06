@@ -1,6 +1,6 @@
 #!/bin/bash
 # Script to mute audio playback stream
-# mute_radiotray_ng /usr/bin/radiotray-ng
+# USAGE: mute_radiotray_ng /usr/bin/radiotray-ng
 
 main() {
     local action=toggle
@@ -44,12 +44,12 @@ toggle() {
     elif [[ "$status" == "no" ]]; then
       mute "$1" ; mv ~/.conky/xmuted.png ~/.conky/muted.png
     fi
-    #volup "$1"   # Uncomment to use volup() value i.e. 70% to override radiotray-ng config volume
+    #volup "$1" # Uncomment to use volup() value i.e. 70% to override radiotray-ng config volume
 }
 
 mute()   { adjust_muteness "$1" 1; }
 unmute() { adjust_muteness "$1" 0; }
-volup() { adjust_vol  "$1" 70%; } # <- Set higher volume level here
+volup() { adjust_vol  "$1" 100%; } # <- Set higher volume level here
 voldown() { adjust_vol  "$1" 45%; } # <- Set lower volume level here
 
 adjust_muteness() { 
