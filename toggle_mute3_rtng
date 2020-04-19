@@ -7,24 +7,23 @@ unmute () { "$HOME/bin/mute_radiotray-ng" -u /usr/bin/radiotray-ng && rename_mut
 # peep () { sleep 0.75; }
 rename_xmuted () { if [ -f "$HOME/.conky/xmuted.png" ]; then { mv "$HOME/.conky/xmuted.png" "$HOME/.conky/muted.png"; } fi }
 rename_muted () { if [ -f "$HOME/.conky/muted.png" ]; then { mv "$HOME/.conky/muted.png" "$HOME/.conky/xmuted.png"; } fi }
-lbc () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station Imported 'LBC UK' ; sleep 3  ;  ~/.conky/conkyradiotray-ng/onair; }
-radio3 () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station BBC 'Radio 3'; sleep 3 ; ~/.conky/conkyradiotray-ng/onair; }
-classicfm () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station Classical 'Classic FM' ; }
-soma () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station Imported 'Space Station' ; }
+# lbc () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station Imported 'LBC UK' ; sleep 3  ;  ~/.conky/conkyradiotray-ng/onair; }
+# radio3 () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station BBC 'Radio 3'; sleep 3 ; ~/.conky/conkyradiotray-ng/onair; }
+# classicfm () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station Classical 'Classic FM' ; }
+# soma () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.radiotray_ng.play_station Imported 'Space Station' ; }
 
-# Clean up any obsolete .conkytimer files
-if [[ -f ~/.conkytimer ]]; then rm ~/.conkytimer
-fi
+# Adlength buffer overrun for daytime ads. Insert value here in secs
+buffer=15
 
 # Conky countdown timer
 conkytimer()
 {
-trap "rm ~/.conkytimer" INT
+#trap "rm ~/.conkytimer" INT
 
 sec=$1
-millisecondsToseonds=$(( $1/1000 ))
+# millisecondsToseonds=$(( $1/1000 ))
 
-for (( i = 0; i < $sec; i++ )); do
+for (( i = 0; i < sec; i++ )); do
         # write remaining sec to file
         timer=$((sec-i))
         display="                               ${timer}"
@@ -33,7 +32,7 @@ for (( i = 0; i < $sec; i++ )); do
         sleep 1
 done
 
-if [[ -f ~/.conkytimer ]]; then rm ~/.conkytimer
+if [[ -f ~/.conkytimer ]]; then rm ~/.conkytimer & touch ~/.conkytimer
 fi
 }
 
@@ -65,6 +64,8 @@ check_top_of_the_hour()
    fi
 }
 
+
+
 check_top_of_the_hour
 
 mute
@@ -77,44 +78,80 @@ qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 0
 
 get_adbreak_length() 
 {
-
 # Get stream metadata
 ffprobe http://media-ice.musicradio.com:80/LBCUK &> "$HOME/stream.txt"
 
-# Cut six digit adbreak length from metadata file and remove any : and print the last two lines
+# Cut six digit adbreak length from metadata file and remove any :
 #adbreaklength=$(printf '%s' | awk -v RS='[[:blank:]]' '/^ADBREAK_LENGTH_/' "$HOME/stream.txt" | cut -c16-21 | sed 's/://g' | tail -n -2)
 
-# Cut six digit adbreak length from metadata file from the line beginning with 'StreamUrl'
+# Cut six digit adbreak length from metadata file from the line beginning with 'StreamUrl'and remove any :
 adbreaklength=$(awk -F 'StreamUrl' '{print $2}' "$HOME/stream.txt" | cut -c25-30 | sed 's/://g')
 
 #Remove any leading 0 digits
 #adbreaklength=$((10#$adbreaklength + 1))
 
+# Run check_for_off_peak()
+check_for_off_peak
 
+# Check if $adbreaklength is not null
+if [ -n "$adbreaklength" ]
+then
 
-# Set as integer and convert from ms to seconds
+# Set as integer and convert from ms to seconds + buffer value
 declare -i ms=$adbreaklength
-declare -i value=("$ms"/1000)
+declare -i value=("$ms"/1000+"$buffer") 
 
 echo "$value"
+fi
+}
 
+check_for_off_peak()
+{  
+   # Get current time in minutes
+   currenttime=$(date +%H:%M)
+
+   if [[ "$currenttime" > "19:00" ]] || [[ "$currenttime" < "04:00" ]]; then
+   timeout=185
+   buffer=0
+   fi
+}
+
+# Adlength buffer overrun for daytime ads. Insert value here in secs
+#buffer=15
+
+
+
+# Set $seconds to value returned by get_adbreak_length()
+seconds=$(get_adbreak_length)
+
+
+# Function for when there is no adbreaklength returned
+no_adbreak_length()
+{
+
+# Sets timeout value for function
+timeout=225 # <--- Set value for adbreak length
+
+# Run check_for_off_peak()
+check_for_off_peak
+
+#Wait until $seconds is greater than 0 or $SECONDS (time of running script) is greater than $timeout then execute do loop
+until [ "$seconds" -gt 0 ] || [ "$SECONDS" -gt $timeout ] 
+
+do
+    seconds=$(get_adbreak_length)
+    display="                               $((timeout - ${SECONDS}))*"
+    echo "$display" > ~/.conkytimer
+    sleep 2
+done
 }
 
 
-# Wait until $seconds is greater than 0 or $SECONDS is greater than 180 then execute do loop
-until [ "$seconds" -gt 0 ] || [ "$SECONDS" -gt 180 ]
-do 
-    # Run get_adbreak_length()
-    get_adbreak_length
-    # Set $seconds to value returned by get_adbreak_length()
-    seconds=$(get_adbreak_length)
-    # Write $SECONDS to file
-    display="                               ${SECONDS}"
-    echo "$display" > ~/.conkytimer
-    sleep 5
-done
+no_adbreak_length
 
-conkytimer $seconds
+
+
+conkytimer "$seconds"
 
 #lbc ;
 unmute

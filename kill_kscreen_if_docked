@@ -1,0 +1,12 @@
+#!/bin/bash
+status="$(xrandr | grep "HDMI-3 connected")"
+    
+while [ -n "$status" ];
+    do
+        #echo docked
+        if pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" > /dev/null
+        then
+        pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" | xargs kill
+        fi
+        sleep 900
+    done

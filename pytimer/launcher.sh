@@ -4,4 +4,4 @@ SCRIPT=`realpath $0`
 SCRIPTPATH=`dirname $SCRIPT`
 
 cd $SCRIPTPATH
-./pytimer_nopresets.py "$@" 2>/dev/null &
+./pytimer.py "$@" 2>/dev/null &
