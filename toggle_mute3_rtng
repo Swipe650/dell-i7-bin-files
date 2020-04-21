@@ -108,9 +108,9 @@ fi
 check_for_off_peak()
 {  
    # Get current time in minutes
-   currenttime=$(date +%H:%M)
+   currenttime=$(date +%H%M)
 
-   if [[ "$currenttime" > "19:00" ]] || [[ "$currenttime" < "04:00" ]]; then
+   if [[ "$currenttime" -gt "1900" ]] || [[ "$currenttime" -lt "0400" ]]; then
    timeout=185
    buffer=0
    fi
