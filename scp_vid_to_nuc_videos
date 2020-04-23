@@ -9,6 +9,7 @@ confirm() {
             ;;
         *)
             false
+            exit 1
             ;;
     esac
 }
