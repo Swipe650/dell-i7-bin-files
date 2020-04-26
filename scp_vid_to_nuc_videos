@@ -17,4 +17,4 @@ confirm() {
 
 confirm "Are you sure you want to copy ""$1"" to nuc/~Videos [y/N]?"
 
-scp /home/swipe/Downloads/"$1" swipe@nuc:~/Videos
+scp /home/swipe/Downloads/$1 swipe@nuc:~/Videos
