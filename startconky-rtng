@@ -1,2 +1,2 @@
- #!/bin/bash
- conky -c ~/.conky/conky-rtng &
+#!/bin/bash
+conky -c ~/.conky/conky-rtng &

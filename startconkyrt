@@ -1,2 +1,2 @@
- #!/bin/bash
- conky -c ~/.conky/conkyrt &
+#!/bin/bash
+conky -c ~/.conky/conkyrt &
