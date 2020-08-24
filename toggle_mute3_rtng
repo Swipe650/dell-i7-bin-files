@@ -45,41 +45,45 @@ show_osd_dialog()
    qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged "${vollevel::-1}"
 }
 
+# top of the hour dialog
+top_of_the_hour_dialog()
+      {
+        mute
+
+        qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 0
+        
+        conkytimer "$adlength"
+          
+        unmute
+
+        show_osd_dialog
+
+        exit
+      }
+
 # check if time is between top of the hour and 6 minutes
 check_top_of_the_hour()
 {  
    # Get current time in minutes
    currenttime=$(date +%M)
-   if [ "$currenttime" -gt "00" ] && [ "$currenttime" -lt "07" ]; then
-        
-        declare -i adlength=30
-        
-        mute
-
-        qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 0
-        
-        #~/.conky/conkytimer "$adlength" &
-        
-        conkytimer "$adlength"
-          
-        #sleep "$adlength"
-        
-        unmute
-
-        show_osd_dialog
-
-        #qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 60
-    
-        exit
-   fi
    
-   # check if time is :58, :59 or :00 (for Talkradio)
-   if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ]; then
-
+    # check if time is :58, :59 or :00 (for Talkradio)
+    
+    if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ]; then
+   
         declare -i adlength=120
         
         top_of_the_hour_dialog
-   fi
+    fi
+    
+    if [ "$currenttime" -gt "00" ] && [ "$currenttime" -lt "07" ]; then
+                
+                declare -i adlength=30
+                
+                top_of_the_hour_dialog
+    fi
+    
+   #fi
 }
 
 
