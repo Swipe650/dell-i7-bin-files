@@ -1,0 +1,16 @@
+#!/bin/bash
+
+google_home="Kitchen mini"
+#google_home="Bedroom mini"
+
+touch ~/.lbc
+
+if [[ -f ~/.tr ]]; then rm ~/.tr & touch ~/.lbc
+fi
+
+vol=$(/home/swipe/bin/cast-linux-amd64 --name "Kitchen mini" status | awk -F 'Volume:' '{print $2}' | cut -c4-5)
+
+/home/swipe/bin/cast-linux-amd64 --name "Kitchen mini" media play http://media-ice.musicradio.com:80/LBCUK
+
+
+/home/swipe/bin/cast-linux-amd64 --name "Kitchen mini" volume $vol 
