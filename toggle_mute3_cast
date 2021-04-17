@@ -16,7 +16,7 @@ set_default_mute_time()
 {
     mute
     
-    sleep 240
+    sleep 250
      
     unmute
 }
@@ -37,7 +37,7 @@ check_top_of_the_hour()
     
     mute
     
-    sleep 180
+    sleep 200
      
     unmute
     

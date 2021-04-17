@@ -1,7 +1,6 @@
 /*
  * Copyright 2014 Martin Klapetek <mklapetek@kde.org>
- * Copyright 2018 Chris Holland <zrenfire@gmail.com>
- * Copyright 2018 /u/koneko-nyaa from /r/kde
+ * Copyright 2019 Kai Uwe Broulik <kde@broulik.de>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -17,82 +16,103 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import QtQuick 2.7
+import QtQuick 2.14
+import QtQuick.Layouts 1.1
 import org.kde.plasma.core 2.0 as PlasmaCore
-import org.kde.plasma.components 2.0 as PlasmaComponents
+import org.kde.plasma.components 3.0 as PlasmaComponents3
 import org.kde.plasma.extras 2.0 as PlasmaExtra
 import QtQuick.Window 2.2
 
-Row {
+RowLayout {
+    // OSD Timeout in msecs - how long it will stay on the screen
+    property int timeout: 1800
+    // This is either a text or a number, if showingProgress is set to true,
+    // the number will be used as a value for the progress bar
+    property var osdValue
+    // Maximum percent value
+    property int osdMaxValue: 100
+    // Icon name to display
+    property string icon
+    // Set to true if the value is meant for progress bar,
+    // false for displaying the value as normal text
+    property bool showingProgress: false
+
     spacing: units.smallSpacing
 
-    property QtObject rootItem
-
-    property int iconWidth: units.iconSizes.medium
-    readonly property int percentageWidth: percentageLabelMetrics.boundingRect.width
-    property int progressBarWidth: Screen.desktopAvailableWidth / 15
-
-    width: iconWidth + spacing + progressBarWidth + spacing + percentageWidth
-    height: iconWidth
-
-    TextMetrics {
-        id: percentageLabelMetrics
-        font.family: percentageLabel.font.family
-        font.weight: percentageLabel.font.weight
-        font.pointSize: percentageLabel.font.pointSize
-        font.pixelSize: percentageLabel.font.pixelSize
-        text: "100"
-    }
+    width: Math.max(Math.min(Screen.desktopAvailableWidth / 2, implicitWidth), units.gridUnit * 12)
+    height: units.iconSizes.medium
 
     PlasmaCore.IconItem {
-        id: icon
-
-        width: iconWidth
-        height: parent.height
-
-        source: rootItem.icon
+        Layout.leftMargin: units.smallSpacing
+        Layout.preferredWidth: units.iconSizes.medium
+        Layout.preferredHeight: units.iconSizes.medium
+        Layout.alignment: Qt.AlignVCenter
+        source: icon
+        visible: valid
     }
 
-    PlasmaComponents.ProgressBar {
+    PlasmaComponents3.ProgressBar {
         id: progressBar
-
-        width: progressBarWidth
-        height: parent.height
-
-        visible: rootItem.showingProgress
-        minimumValue: 0
-        maximumValue: 100
-
-        value: Number(rootItem.osdValue)
+        Layout.fillWidth: true
+        Layout.alignment: Qt.AlignVCenter
+        // So it never exceeds the minimum popup size
+        Layout.preferredWidth: 1
+        Layout.rightMargin: units.smallSpacing
+        visible: showingProgress
+        from: 0
+        to: osdMaxValue
+        value: Number(osdValue)
     }
 
+    // Get the width of a three-digit number so we can size the label
+    // to the maximum width to avoid the progress bad resizing itself
+    TextMetrics {
+        id: widestLabelSize
+        text: i18n("100%")
+        font: percentageLabel.font
+    }
+
+    // Numerical display of progress bar value
     PlasmaExtra.Heading {
         id: percentageLabel
-
-        width: percentageWidth
-        height: parent.height
-
-        visible: rootItem.showingProgress
-        text: (typeof rootItem.osdValue !== "undefined" ? rootItem.osdValue : "")
+        Layout.fillHeight: true
+        Layout.preferredWidth: widestLabelSize.width
+        Layout.rightMargin: units.smallSpacing
+        Layout.alignment: Qt.AlignVCenter
+        level: 3
         horizontalAlignment: Text.AlignHCenter
-        maximumLineCount: 1
-        elide: Text.ElideRight
-        minimumPointSize: theme.defaultFont.pointSize
-        fontSizeMode: Text.VerticalFit
+        verticalAlignment: Text.AlignVCenter
+        text: i18nc("Percentage value", "%1%", progressBar.value)
+        visible: showingProgress
+        // Display a subtle visual indication that the volume might be
+        // dangerously high
+        // ------------------------------------------------
+        // Keep this in sync with the copies in plasma-pa:ListItemBase.qml
+        // and plasma-pa:VolumeSlider.qml
+        color: {
+            if (progressBar.value <= 100) {
+                return theme.textColor
+            } else if (progressBar.value > 100 && progressBar.value <= 125) {
+                return theme.neutralTextColor
+            } else {
+                return theme.negativeTextColor
+            }
+        }
     }
 
     PlasmaExtra.Heading {
         id: label
-
-        width: progressBarWidth
-        height: parent.height
-
-        visible: !rootItem.showingProgress
-        text: rootItem.showingProgress ? "" : (rootItem.osdValue ? rootItem.osdValue : "")
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.rightMargin: units.smallSpacing
+        Layout.alignment: Qt.AlignVCenter
+        level: 3
         horizontalAlignment: Text.AlignHCenter
-        maximumLineCount: 1
+        verticalAlignment: Text.AlignVCenter
+        textFormat: Text.PlainText
+        wrapMode: Text.NoWrap
         elide: Text.ElideRight
-        minimumPointSize: theme.defaultFont.pointSize
-        fontSizeMode: Text.Fit
+        text: !showingProgress && osdValue ? osdValue : ""
+        visible: !showingProgress
     }
 }
