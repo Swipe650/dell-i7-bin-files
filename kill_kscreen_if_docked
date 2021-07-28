@@ -10,7 +10,7 @@ done
 
 
 # Check to see if HDMI-3 port is connected (laptop docked)
-status="$(xrandr | grep "HDMI-3 connected")"
+status="$(xrandr | grep "HDMI-2 connected")"
 
 # While $status variable is not empty (HDMI-3 connected) check for  kscreen_backend_launcher process every 15 minutes and then kill it
 while [ -n "$status" ];

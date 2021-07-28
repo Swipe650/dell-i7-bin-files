@@ -1,6 +1,6 @@
 #!/bin/bash
 
-google_home="Kitchen mini"
+google_home="Kitchen"
 #google_home="Bedroom mini"
 
 get_vol=$("$HOME/bin/cast-linux-amd64" --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c2-5)
@@ -37,7 +37,7 @@ check_top_of_the_hour()
     
     mute
     
-    sleep 200
+    sleep 210
      
     unmute
     
