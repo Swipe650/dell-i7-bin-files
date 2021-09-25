@@ -1,3 +1,9 @@
 #!/bin/bash
 
-cast-linux-amd64 --name "Kitchen" media play http://timesradio.wireless.radio/stream?ref=rf
+google_home="Kitchen"
+
+vol=$(/home/swipe/bin/cast-linux-amd64 --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c3-5)
+
+/home/swipe/bin/cast-linux-amd64 --name "$google_home" media play http://timesradio.wireless.radio/stream?ref=rf
+
+/home/swipe/bin/cast-linux-amd64 --name "$google_home" volume $vol
