@@ -10,4 +10,7 @@ vol=$(/home/swipe/bin/cast-linux-amd64 --name "$google_home" status | awk -F 'Vo
 incl=0.03
 volup=`echo $vol + $incl | bc`
 
-/home/swipe/bin/cast-linux-amd64 --name "$google_home" volume $volup
+#/home/swipe/bin/cast-linux-amd64 --name "$google_home" volume $volup
+
+
+/home/swipe/bin/set_vol_home "$volup"
