@@ -16,7 +16,7 @@ set_default_mute_time()
 {
     mute
     
-    sleep 260
+    sleep 250
      
     unmute
 }
@@ -43,7 +43,13 @@ check_top_of_the_hour()
     
     else
     
-    set_default_mute_time
+    #set_default_mute_time
+    
+    mute
+    
+    sleep 270
+     
+    unmute
     
     fi
     esac
