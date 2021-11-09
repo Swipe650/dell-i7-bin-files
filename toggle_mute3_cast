@@ -41,6 +41,15 @@ check_top_of_the_hour()
      
     unmute
     
+        
+    elif [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ] ; then
+    
+    mute
+    
+    sleep 30
+     
+    unmute
+    
     else
     
     #set_default_mute_time

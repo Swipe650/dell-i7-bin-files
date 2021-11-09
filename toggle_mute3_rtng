@@ -61,32 +61,68 @@ top_of_the_hour_dialog()
         exit
       }
 
-# check if time is between top of the hour and 6 minutes
+
 check_top_of_the_hour()
 {  
-   # Get current time in minutes
-   currenttime=$(date +%M)
-   
-    # check if time is :58, :59 or :00 (for Talkradio)
+# Get current time in minutes
+    currenttime=$(date +%M)
+
+# check time for Talkradio
+    st=$(test -f .tr && echo "TalkRadio")
+    talkradio='TalkRadio'
+    case "$st" in 
+    "$talkradio" )
     
-    if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ]; then
+    if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ] || [ "$currenttime" -eq "01" ] || [ "$currenttime" -eq "02" ] || [ "$currenttime" -eq "03" ]  || [ "$currenttime" -eq "04" ]; then
+    
    
-        declare -i adlength=180
+    
+    declare -i adlength=210
+         
+    top_of_the_hour_dialog
+    
         
-        top_of_the_hour_dialog
-    fi
+    elif [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ] ; then
     
+    declare -i adlength=30
+         
+    top_of_the_hour_dialog
+    
+    #else
+     
+    #declare -i adlength=270
+         
+    #top_of_the_hour_dialog
+    
+    fi
+    esac
+    
+    
+    # check time for lbc
+    st=$(test -f .lbc && echo "LBC UK")
+    lbc='LBC UK'
+    case "$st" in 
+    "$lbc" )
+
     if [ "$currenttime" -gt "00" ] && [ "$currenttime" -lt "07" ]; then
-                
-                declare -i adlength=30
-                
-                top_of_the_hour_dialog
+# 
+    declare -i adlength=30
+         
+    top_of_the_hour_dialog
+    
+    
+    else
+    
+    #set_default_mute_time
+    
+    #declare -i adlength=250
+         
+    top_of_the_hour_dialog
+    
     fi
     
-   #fi
+    esac
 }
-
-
 
 check_top_of_the_hour
 
