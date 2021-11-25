@@ -1,7 +1,7 @@
 #!/bin/bash
 
-google_home="Kitchen"
-#google_home="Bedroom mini"
+#google_home="Kitchen"
+google_home="Bedroom mini"
 
 get_vol=$("$HOME/bin/cast-linux-amd64" --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c2-5)
 
@@ -33,7 +33,7 @@ check_top_of_the_hour()
     case "$st" in 
     "$talkradio" )
     
-    if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ] || [ "$currenttime" -eq "01" ] || [ "$currenttime" -eq "02" ] || [ "$currenttime" -eq "03" ]  || [ "$currenttime" -eq "04" ]; then
+    if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ] || [ "$currenttime" -eq "01" ] || [ "$currenttime" -eq "02" ] || [ "$currenttime" -eq "03" ]  || [ "$currenttime" -eq "04" ] ; then
     
     mute
     
@@ -42,7 +42,7 @@ check_top_of_the_hour()
     unmute
     
         
-    elif [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ] ; then
+    elif [ "$currenttime" -eq "32" ] || [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ]  || [ "$currenttime" -eq "37" ] || [ "$currenttime" -eq "05" ] || [ "$currenttime" -eq "06" ]  || [ "$currenttime" -eq "07" ]; then
     
     mute
     

@@ -22,3 +22,10 @@ sed -i '4s/# *//' ~/bin/cast_lbc
 sed -i '4s/^/#/' ~/bin/cast_lbc
 sed -i '3s/# *//' ~/bin/cast_lbc
 
+sed -i '4s/# *//' ~/bin/cast_vol_down
+sed -i '4s/^/#/' ~/bin/cast_vol_down
+sed -i '3s/# *//' ~/bin/cast_vol_down
+
+sed -i '4s/# *//' ~/bin/cast_vol_up
+sed -i '4s/^/#/' ~/bin/cast_vol_up
+sed -i '3s/# *//' ~/bin/cast_vol_up
