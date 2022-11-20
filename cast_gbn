@@ -3,14 +3,16 @@
 google_home="Kitchen"
 #google_home="Bedroom mini"
 
-touch ~/.lbc
+#touch ~/.lbc
 
-if [[ -f ~/.tr ]]; then rm ~/.tr & touch ~/.lbc
-fi
+#if [[ -f ~/.tr ]]; then rm ~/.tr & touch ~/.lbc
+#fi
 
 vol=$(/home/swipe/bin/cast-linux-amd64 --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c3-5)
 
-/home/swipe/bin/cast-linux-amd64 --name "$google_home" media play http://media-ice.musicradio.com:80/LBCUK
+/home/swipe/bin/cast-linux-amd64 --name "$google_home" media play http://listen-gbnews.sharp-stream.com/gbnews.mp3
+
+#http://listen-gbnews.sharp-stream.com/gbnews.aac?ref=RF
 
 
 /home/swipe/bin/cast-linux-amd64 --name "$google_home" volume $vol 

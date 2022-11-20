@@ -1,0 +1,4 @@
+#!/bin/bash
+
+$HOME/bin/cast-linux-amd64 --name "Kitchen" media play http://tunein.streamguys1.com/bloomberg991
+set_vol_home 0.5

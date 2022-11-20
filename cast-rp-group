@@ -1,0 +1,3 @@
+#!/bin/bash
+
+$HOME/bin/cast-linux-amd64 --name "Group" media play http://stream.radioparadise.com:80/aac-320
