@@ -1,3 +1,4 @@
 #!/bin/bash
 
-cast-linux-amd64 --name "Kitchen" media play http://stream.fr.morow.com:8080/morow_med.mp3
+#cast-linux-amd64 --name "Kitchen" media play http://stream.fr.morow.com:8080/morow_med.mp3
+cast-linux-amd64 --name "Amp" media play http://stream.fr.morow.com:8080/morow_med.mp3
