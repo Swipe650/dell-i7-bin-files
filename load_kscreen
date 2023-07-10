@@ -1,3 +1,3 @@
 #!/bin/bash
 
-qdbus org.kde.kded5 /kded org.kde.kded5.loadModule "kscreen" >/dev/null
+qdbus org.kde.kded5 /kded org.kde.kded5.loadModule "kscreen" 2> /dev/null
