@@ -21,6 +21,6 @@ while [ -n "$status" ];
 #         pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" | xargs kill
 #         fi
 
-        qdbus org.kde.kded5 /kded org.kde.kded5.unloadModule "kscreen"
+        qdbus org.kde.kded5 /kded org.kde.kded5.unloadModule "kscreen" 2>&1 >/dev/null
         sleep 300
     done
