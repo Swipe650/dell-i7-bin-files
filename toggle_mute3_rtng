@@ -88,12 +88,6 @@ check_top_of_the_hour()
          
     top_of_the_hour_dialog
     
-    #else
-     
-    #declare -i adlength=270
-         
-    #top_of_the_hour_dialog
-    
     fi
     esac
     
@@ -119,7 +113,7 @@ check_top_of_the_hour()
     
     #no_adbreak_length
          
-    top_of_the_hour_dialog
+    #top_of_the_hour_dialog
     
     fi
     
