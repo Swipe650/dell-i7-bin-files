@@ -1,7 +1,5 @@
 #!/bin/bash
 
-cd /home/swipe/bin
-
 mute () { "$HOME/bin/mute_radiotray-ng" -m /usr/bin/radiotray-ng && rename_xmuted; }
 unmute () { "$HOME/bin/mute_radiotray-ng" -u /usr/bin/radiotray-ng && rename_muted; }
 # high_vol () { "$HOME/bin/mute_radiotray-ng" -h /usr/bin/radiotray-ng; }
@@ -28,7 +26,7 @@ conkytimer()
    for (( i = 0; i < sec; i++ )); do
          # write remaining sec to file
          timer=$((sec-i))
-         display="                     display${timer}"
+         display="                     ${timer}"
          echo "$display" > ~/.conkytimer
          # wait 1sec
          sleep 1
@@ -79,12 +77,12 @@ check_top_of_the_hour()
     
    
     
-    declare -i adlength=220
+    declare -i adlength=210
          
     top_of_the_hour_dialog
     
         
-    elif [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ] ; then
+    elif [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ]  || [ "$currenttime" -eq "37" ]; then
     
     declare -i adlength=30
          
@@ -113,11 +111,13 @@ check_top_of_the_hour()
     top_of_the_hour_dialog
     
     
-    else
+    #else
     
     #set_default_mute_time
     
     #declare -i adlength=250
+    
+    #no_adbreak_length
          
     top_of_the_hour_dialog
     
@@ -189,7 +189,7 @@ seconds=$(get_adbreak_length)
 no_adbreak_length()
 {
    # Sets timeout value for function
-   timeout=230 # <--- Set value for adbreak length
+   timeout=225 # <--- Set value for adbreak length
 
    # Run check_for_off_peak()
    check_for_off_peak
@@ -199,7 +199,7 @@ no_adbreak_length()
 
       do
          seconds=$(get_adbreak_length)
-         display="                     $((timeout - SECONDS))"
+         display="                     $((timeout - SECONDS))*"
          echo "$display" > ~/.conkytimer
          sleep 2
       done
