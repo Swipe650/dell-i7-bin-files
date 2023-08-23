@@ -8,6 +8,7 @@ for pid in $(pidof -x unload_kscreen_if_docked); do
     fi
 done
 
+sleep 20
 
 # Check to see if HDMI-3 port is connected (laptop docked)
 status="$(xrandr | grep "HDMI-2 connected")"
