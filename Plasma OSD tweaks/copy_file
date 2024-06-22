@@ -1,4 +1,5 @@
 #!/bin/bash
+
 sudo cp OsdItem.qml /usr/share/plasma/shells/org.kde.plasma.desktop/contents/osd/OsdItem.qml
 
 kquitapp5 plasmashell && plasmashell &

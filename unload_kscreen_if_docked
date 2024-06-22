@@ -8,7 +8,7 @@ for pid in $(pidof -x unload_kscreen_if_docked); do
     fi
 done
 
-sleep 20
+sleep 60
 
 # Check to see if HDMI-3 port is connected (laptop docked)
 status="$(xrandr | grep "HDMI-2 connected")"
@@ -22,6 +22,6 @@ while [ -n "$status" ];
 #         pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" | xargs kill
 #         fi
 
-        qdbus org.kde.kded5 /kded org.kde.kded5.unloadModule "kscreen" 2>&1 >/dev/null
+        qdbus org.kde.kded6 /kded org.kde.kded6.unloadModule "kscreen" 2>&1 >/dev/null
         sleep 300
     done

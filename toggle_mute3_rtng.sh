@@ -73,18 +73,18 @@ check_top_of_the_hour()
     case "$st" in 
     "$talkradio" )
     
-    if [ "$currenttime" -eq "57" ] || [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ] || [ "$currenttime" -eq "01" ] || [ "$currenttime" -eq "02" ] || [ "$currenttime" -eq "03" ]  || [ "$currenttime" -eq "04" ]; then
+    if [ "$currenttime" -eq "57" ] || [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ] || [ "$currenttime" -eq "01" ] || [ "$currenttime" -eq "02" ] || [ "$currenttime" -eq "03" ]; then
     
    
     
-    declare -i adlength=180
+    declare -i adlength=230
          
     top_of_the_hour_dialog
     
         
     elif [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ]  || [ "$currenttime" -eq "37" ]; then
     
-    declare -i adlength=30
+    declare -i adlength=150
          
     top_of_the_hour_dialog
     
@@ -183,7 +183,7 @@ seconds=$(get_adbreak_length)
 no_adbreak_length()
 {
    # Sets timeout value for function
-   timeout=225 # <--- Set value for adbreak length
+   timeout=205 # <--- Set value for adbreak length
 
    # Run check_for_off_peak()
    check_for_off_peak

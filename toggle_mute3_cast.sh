@@ -57,7 +57,7 @@ check_top_of_the_hour()
     
     mute
     
-    sleep 30
+    sleep 180
      
     unmute
     
