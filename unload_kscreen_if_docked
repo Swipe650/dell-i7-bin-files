@@ -17,11 +17,11 @@ status="$(xrandr | grep "HDMI-2 connected")"
 while [ -n "$status" ];
     do
         #echo docked
-#         if pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" > /dev/null
-#         then
-#         pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" | xargs kill
-#         fi
+        if pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" > /dev/null
+        then
+        pidof -x "$(basename /usr/lib/kf5/kscreen_backend_launcher)" | xargs kill
+        fi
 
-        qdbus org.kde.kded6 /kded org.kde.kded6.unloadModule "kscreen" 2>&1 >/dev/null
+#        qdbus org.kde.kded6 /kded org.kde.kded6.unloadModule "kscreen" 2>&1 >/dev/null
         sleep 300
     done
