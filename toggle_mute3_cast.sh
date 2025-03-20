@@ -25,7 +25,7 @@ set_lbc_mute_time()
 {
     mute
     
-    sleep 250
+    sleep 220
      
     unmute
 }

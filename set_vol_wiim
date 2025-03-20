@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Pass input variable $1 to volume and write $1 to volume value in mute_wiim.sh on line 6
+
+playerctl -p wiimplay volume $1 && sed -i -e "6s/\(volume \).*/\1$1/" ~/bin/mute_wiim.sh
