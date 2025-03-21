@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Get the current artist using playerctl
-artist=$(playerctl metadata artist)
+artist=$(playerctl --player=wiimplay metadata artist)
 
 # Check if the artist is available
 if [ -z "$artist" ]; then
