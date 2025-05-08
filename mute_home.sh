@@ -7,7 +7,7 @@ google_home="Kitchen home"
 vol=$(/home/swipe/bin/cast-linux-amd64 --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c4-5 | bc -l)
 
     if [[ "$vol" -eq "00" ]]; then
-      /home/swipe/bin/cast-linux-amd64 --name "$google_home" volume .30
+      /home/swipe/bin/cast-linux-amd64 --name "$google_home" volume .39
       
       
     elif [[ "$vol" -gt "01" ]]; then

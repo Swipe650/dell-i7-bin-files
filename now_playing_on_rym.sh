@@ -2,6 +2,7 @@
 
 # Get the current artist using playerctl
 artist=$(playerctl --player=wiimplay metadata artist)
+artist=$(playerctl metadata artist)
 album=$(playerctl metadata album)
 
 # Check if the artist is available
