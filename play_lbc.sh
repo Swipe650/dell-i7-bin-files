@@ -1,6 +1,7 @@
 #!/bin/sh
 
 touch ~/.lbc
+rm ~/.gbn
 
 if [[ -f ~/.tr ]]; then rm ~/.tr & touch ~/.lbc
 fi

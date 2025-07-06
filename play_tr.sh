@@ -9,6 +9,8 @@ setvol () { qdbus com.github.radiotray_ng /com/github/radiotray_ng com.github.ra
 
 touch ~/.tr
 
+rm ~/.gbn
+
 if [[ -f ~/.lbc ]]; then rm ~/.lbc & touch ~/.tr
 fi
 
