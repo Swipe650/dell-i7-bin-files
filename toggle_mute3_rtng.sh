@@ -54,6 +54,8 @@ check_top_of_the_hour() {
         ".tr:TalkRadio:28 29 30 31 32 33 34 35 36 37:140"
         ".lbc:LBC UK:00 01 02 03 04 05 06:30"
         ".lbc:LBC UK:28 29 30 31 32 33 34 35 36 37:140"
+        ".gbn:GB News:00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 64 55 56 57 58 59:220"
+        #".gbn:GB News:28 29 30 31 32 33 34 35 36 37:220"
     )
 
     for station in "${stations[@]}"; do
@@ -77,10 +79,11 @@ check_for_off_peak() {
         fi
     done
 }
+ 
 
 # Default adbreak length function
 default_adbreak_length() {
-    timeout=185
+    timeout=180
     check_for_off_peak
     while [ "$SECONDS" -le "$timeout" ]; do
         echo "                     $((timeout - SECONDS))" > ~/.conkytimer
@@ -90,6 +93,7 @@ default_adbreak_length() {
 
 # Main script
 check_top_of_the_hour
+check_for_gb_news
 mute_app /usr/bin/radiotray-ng
 mute_app /usr/bin/vlc
 qdbus org.kde.plasmashell /org/kde/osdService org.kde.osdService.volumeChanged 0
