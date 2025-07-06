@@ -7,5 +7,6 @@ players=$(playerctl -l 2>/dev/null)
 if echo "$players" | grep -q "wiimplay"; then
     playerctl --player=wiimplay play-pause
 else
-    playerctl -p "$(playerctl -l | awk 'NR==3')" play-pause
+    #playerctl  -p "$(playerctl -l | awk 'NR==3')" play-pause
+    playerctl  play-pause
 fi
