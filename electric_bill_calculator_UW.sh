@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "=== Monthly Electric Bill Calculator ==="
+echo "=== Electric Bill Calculator ==="
 
 # E.On Next Reward v1
 # Fixed rates (in pence)
