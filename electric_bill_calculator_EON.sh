@@ -21,7 +21,7 @@ standing_charge=$(echo "scale=4; $standing_charge_p / 100" | bc)
 # Get usage and number of days
 read -p "Enter number of kWh used during the day: " day_usage
 read -p "Enter number of kWh used during the night: " night_usage
-read -p "Enter number of days in the current month: " num_days
+read -p "Enter number of days standing charge: " num_days
 
 # Calculate costs
 day_cost=$(echo "$day_rate * $day_usage" | bc)
@@ -36,4 +36,4 @@ echo "Day rate ($day_rate_p)         : £$day_cost"
 echo "Night rate ($night_rate_p)       : £$night_cost"
 echo "Standing charge ($standing_charge_p)  : £$standing_cost"
 echo "-----------------------------"
-echo "Total cost for month : £$total_cost"
+echo "Total cost  : £$total_cost"
