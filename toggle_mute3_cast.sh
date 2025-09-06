@@ -3,11 +3,12 @@
 google_home="Kitchen home"
 #google_home="Bedroom mini"
 
+CAST_CMD="/home/swipe/bin/cast-linux-amd64 --name \"$google_home\""
 # Unmute the device
-mute () { /home/swipe/bin/cast-linux-amd64 --name "$google_home" mute; }
+mute () { eval $CAST_CMD mute; }
 
 # Mute the device if it's not already muted
-unmute () { /home/swipe/bin/cast-linux-amd64 --name "$google_home" unmute; }
+unmute () { eval $CAST_CMD unmute; }
 
 # Default mute/unmute cycle
 set_default_mute_time() 
