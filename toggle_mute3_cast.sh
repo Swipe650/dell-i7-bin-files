@@ -3,98 +3,60 @@
 google_home="Kitchen home"
 #google_home="Bedroom mini"
 
-get_vol=$("$HOME/bin/cast-linux-amd64" --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c2-5)
+# Unmute the device
+mute () { /home/swipe/bin/cast-linux-amd64 --name "$google_home" mute; }
 
-vol=$get_vol
+# Mute the device if it's not already muted
+unmute () { /home/swipe/bin/cast-linux-amd64 --name "$google_home" unmute; }
 
-mute () { "$HOME/bin/cast-linux-amd64" --name "$google_home" volume 0; }
-
-
-unmute () { "$HOME/bin/cast-linux-amd64" --name "$google_home" volume $vol ; }
-
-set_default_mute_time()
+# Default mute/unmute cycle
+set_default_mute_time() 
 {
     mute
-    
-    sleep 205
-     
+    sleep 180
     unmute
 }
 
-set_lbc_mute_time()
-{
+# LBC-specific mute/unmute cycle
+set_lbc_mute_time() {
     mute
-    
-    sleep 220
-     
+    sleep 160
     unmute
 }
 
-
-
-
-check_top_of_the_hour()
-{  
-# Get current time in minutes
+# Function to check the top of the hour for different cases
+check_top_of_the_hour() {
+    # Get the current time in minutes
     currenttime=$(date +%M)
 
-# check time for Talkradio
-    st=$(test -f .tr && echo "TalkRadio")
-    talkradio='TalkRadio'
-    case "$st" in 
-    "$talkradio" )
-    
-    if [ "$currenttime" -eq "58" ] || [ "$currenttime" -eq "59" ]  || [ "$currenttime" -eq "00" ] || [ "$currenttime" -eq "01" ] || [ "$currenttime" -eq "02" ] || [ "$currenttime" -eq "03" ]  || [ "$currenttime" -eq "04" ] ; then
-    
-    mute
-    
-    sleep 200
-     
-    unmute
-    
-        
-    elif [ "$currenttime" -eq "32" ] || [ "$currenttime" -eq "33" ] || [ "$currenttime" -eq "34" ]  || [ "$currenttime" -eq "35" ] || [ "$currenttime" -eq "36" ]  || [ "$currenttime" -eq "37" ] || [ "$currenttime" -eq "05" ] || [ "$currenttime" -eq "06" ]  || [ "$currenttime" -eq "07" ]; then
-    
-    mute
-    
-    sleep 180
-     
-    unmute
-    
-    else
-    
-    mute
-    
-    set_default_mute_time
-    
-    #sleep 210
-     
-    unmute
-    
+    # Check for TalkRadio
+    if [ -f .tr ]; then
+        if [[ "$currenttime" =~ ^(00|01|02|03|04|58|59)$ ]]; then
+            mute
+            sleep 180
+            unmute
+        elif [[ "$currenttime" =~ ^(32|33|34|35|36|37|05|06|07)$ ]]; then
+            mute
+            sleep 140
+            unmute
+        else
+            mute
+            set_default_mute_time
+            unmute
+        fi
     fi
-    esac
-    
-    # check time for lbc
-    st=$(test -f .lbc && echo "LBC UK")
-    lbc='LBC UK'
-    case "$st" in 
-    "$lbc" )
 
-    if [ "$currenttime" -gt "00" ] && [ "$currenttime" -lt "07" ]; then
-# 
-    mute
-    
-    sleep 30
-     
-    unmute
-    
-    else
-    
-    set_lbc_mute_time
-    
+    # Check for LBC UK
+    if [ -f .lbc ]; then
+        if [ "$currenttime" -gt "00" ] && [ "$currenttime" -lt "07" ]; then
+            mute
+            sleep 30
+            unmute
+        else
+            set_lbc_mute_time
+        fi
     fi
-    
-    esac
 }
 
-check_top_of_the_hour 
+# Run the check
+check_top_of_the_hour

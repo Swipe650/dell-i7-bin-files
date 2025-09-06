@@ -14,3 +14,5 @@ vol=$(/home/swipe/bin/cast-linux-amd64 --name "$google_home" status | awk -F 'Vo
 
 
 /home/swipe/bin/cast-linux-amd64 --name "$google_home" volume $vol 
+
+/home/swipe/bin/cast-linux-amd64 --name "$google_home" unmute
