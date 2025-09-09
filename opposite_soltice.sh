@@ -6,7 +6,7 @@ DAYS_IN_YEAR=365
 DEFAULT_YEAR=2024  # Use a leap year for better accuracy
 
 # Prompt user
-read -p "Enter a date (e.g., 6 March, 9th September, 09/09/25): " raw_input
+read -p "Enter a date (e.g., 9 September, 9th September, 09/09/25): " raw_input
 
 # 🧹 Remove ordinal suffixes: st, nd, rd, th (case-insensitive)
 cleaned_input=$(echo "$raw_input" | sed -E 's/\<([0-9]{1,2})(st|nd|rd|th)\>/\1/gI')
