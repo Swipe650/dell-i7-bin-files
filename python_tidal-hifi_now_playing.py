@@ -28,7 +28,7 @@ HTML_TEMPLATE = """
             width:100%;
             height:100%;
             background-size:cover;
-            filter:blur(40px) brightness(0.25);
+            filter:blur(10px) brightness(0.35);
             z-index:-1;
             transition: background-image 0.5s ease;
         }
@@ -42,17 +42,17 @@ HTML_TEMPLATE = """
 
         .card {
             display:flex;
-            gap:60px;
+            gap:48px;  /* Reduced from 60px (20% decrease) */
             background:rgba(0,0,0,0.4);
-            padding:50px;
-            border-radius:28px;
+            padding:40px;  /* Reduced from 50px (20% decrease) */
+            border-radius:22px;  /* Reduced from 28px (~20% decrease) */
             backdrop-filter:blur(20px);
         }
 
         .art {
-            width:400px;
-            border-radius:20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+            width:320px;  /* Reduced from 400px (20% decrease) */
+            border-radius:16px;  /* Reduced from 20px (20% decrease) */
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);  /* Adjusted shadow proportionally */
         }
 
         .info {
@@ -62,31 +62,31 @@ HTML_TEMPLATE = """
         }
 
         .track {
-            font-size:3.2em;
+            font-size:2.56em;  /* Reduced from 3.2em (20% decrease) */
             font-weight:600;
-            margin-bottom:10px;
+            margin-bottom:8px;  /* Reduced from 10px (20% decrease) */
         }
 
         .artist {
             color:#ccc;
-            font-size:1.8em;
-            margin-bottom:5px;
+            font-size:1.44em;  /* Reduced from 1.8em (20% decrease) */
+            margin-bottom:4px;  /* Reduced from 5px (20% decrease) */
         }
 
         .album {
             color:#999;
-            margin-bottom:25px;
-            font-size:1.3em;
+            margin-bottom:20px;  /* Reduced from 25px (20% decrease) */
+            font-size:1.04em;  /* Reduced from 1.3em (20% decrease) */
         }
 
         .progress-container {
-            width:600px;
-            height:10px;
+            width:480px;  /* Reduced from 600px (20% decrease) */
+            height:8px;  /* Reduced from 10px (20% decrease) */
             background:rgba(255,255,255,0.2);
-            border-radius:10px;
+            border-radius:8px;  /* Reduced from 10px (20% decrease) */
             overflow:hidden;
             cursor:pointer;
-            margin-bottom:8px;
+            margin-bottom:6px;  /* Reduced from 8px (25% decrease) */
         }
 
         .progress {
@@ -99,24 +99,24 @@ HTML_TEMPLATE = """
         .time {
             display:flex;
             justify-content:space-between;
-            font-size:1em;
+            font-size:0.8em;  /* Reduced from 1em (20% decrease) */
             color:#aaa;
         }
 
         .controls {
-            margin-top:25px;
+            margin-top:20px;  /* Reduced from 25px (20% decrease) */
             display:flex;
-            gap:25px;
+            gap:20px;  /* Reduced from 25px (20% decrease) */
         }
 
         .btn {
             background:rgba(255,255,255,0.1);
             border:none;
             color:white;
-            padding:12px 18px;
-            border-radius:12px;
+            padding:10px 14px;  /* Reduced from 12px 18px (~20% decrease) */
+            border-radius:10px;  /* Reduced from 12px (~17% decrease) */
             cursor:pointer;
-            font-size:1.2em;
+            font-size:0.96em;  /* Reduced from 1.2em (20% decrease) */
         }
 
         .btn:hover {
@@ -124,8 +124,8 @@ HTML_TEMPLATE = """
         }
 
         .meta {
-            margin-top:15px;
-            font-size:1em;
+            margin-top:12px;  /* Reduced from 15px (20% decrease) */
+            font-size:0.8em;  /* Reduced from 1em (20% decrease) */
             color:#bbb;
         }
     </style>
