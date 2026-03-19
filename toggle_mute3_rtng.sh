@@ -21,7 +21,7 @@ conkytimer() {
     sec=$1
     for (( i = 0; i < sec; i++ )); do
         timer=$((sec-i))
-        echo "                     ${timer}" > ~/.conkytimer
+        echo "                          ${timer}" > ~/.conkytimer
         sleep 1
     done
     rm -f ~/.conkytimer
@@ -86,7 +86,7 @@ default_adbreak_length() {
     timeout=180
     check_for_off_peak
     while [ "$SECONDS" -le "$timeout" ]; do
-        echo "                     $((timeout - SECONDS))" > ~/.conkytimer
+        echo "                        $((timeout - SECONDS))" > ~/.conkytimer
         sleep 1
     done
 }
