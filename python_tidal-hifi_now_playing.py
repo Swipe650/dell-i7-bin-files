@@ -22,111 +22,96 @@ HTML_TEMPLATE = """
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body { margin:0; font-family:-apple-system; color:white; overflow:hidden; }
-
-        .bg {
-            position:fixed;
-            width:100%;
-            height:100%;
-            background-size:cover;
-            filter:blur(10px) brightness(0.35);
-            z-index:-1;
-            transition: background-image 0.5s ease;
+        .bg { position:fixed; width:100%; height:100%; background-size:cover; filter:blur(10px) brightness(0.35); z-index:-1; transition: background-image 0.5s ease; }
+        .overlay { display:flex; height:100vh; align-items:center; justify-content:center; }
+        .card { display:flex; gap:40px; background:rgba(0,0,0,0.4); padding:30px; border-radius:20px; backdrop-filter:blur(20px); max-width:90vw; }
+        .art { 
+            width:280px;  /* Increased from 260px */
+            border-radius:16px; 
+            transition: transform 0.3s ease;  /* Added smooth hover effect */
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);  /* Added shadow for depth */
         }
-
-        .overlay {
-            display:flex;
-            height:100vh;
-            align-items:center;
-            justify-content:center;
+        .art:hover {
+            transform: scale(1.02);  /* Slight zoom on hover */
         }
-
-        .card {
-            display:flex;
-            gap:48px;  /* Reduced from 60px (20% decrease) */
-            background:rgba(0,0,0,0.4);
-            padding:40px;  /* Reduced from 50px (20% decrease) */
-            border-radius:22px;  /* Reduced from 28px (~20% decrease) */
-            backdrop-filter:blur(20px);
+        .info { 
+            display:flex; 
+            flex-direction:column; 
+            justify-content:center; 
+            min-width: 400px;  /* Set minimum width to match previous fixed size */
+            flex: 1;
         }
-
-        .art {
-            width:320px;  /* Reduced from 400px (20% decrease) */
-            border-radius:16px;  /* Reduced from 20px (20% decrease) */
-            box-shadow: 0 8px 32px rgba(0,0,0,0.6);  /* Adjusted shadow proportionally */
+        .track { 
+            font-size:2.2em;  /* Decreased from 2.4em (reduced by approximately 1 point) */
+            font-weight:600;  /* Added slight bold for better readability */
+            word-break:break-word; 
+            overflow-wrap:break-word;
+            margin-bottom:8px;  /* Added spacing */
         }
-
-        .info {
-            display:flex;
-            flex-direction:column;
-            justify-content:center;
+        .artist { 
+            font-size:1.4em;  /* Increased from default */
+            color:#ccc; 
+            margin-bottom:4px;
         }
-
-        .track {
-            font-size:2.56em;  /* Reduced from 3.2em (20% decrease) */
-            font-weight:600;
-            margin-bottom:8px;  /* Reduced from 10px (20% decrease) */
+        .album { 
+            font-size:1.2em;  /* Increased from default */
+            color:#999; 
+            margin-bottom:20px; 
         }
-
-        .artist {
-            color:#ccc;
-            font-size:1.44em;  /* Reduced from 1.8em (20% decrease) */
-            margin-bottom:4px;  /* Reduced from 5px (20% decrease) */
-        }
-
-        .album {
-            color:#999;
-            margin-bottom:20px;  /* Reduced from 25px (20% decrease) */
-            font-size:1.04em;  /* Reduced from 1.3em (20% decrease) */
-        }
-
-        .progress-container {
-            width:480px;  /* Reduced from 600px (20% decrease) */
-            height:8px;  /* Reduced from 10px (20% decrease) */
-            background:rgba(255,255,255,0.2);
-            border-radius:8px;  /* Reduced from 10px (20% decrease) */
-            overflow:hidden;
+        .progress-container { 
+            width:100%;  /* Dynamic width - fills the container */
+            height:6px; 
+            background:rgba(255,255,255,0.2); 
+            border-radius:10px; 
+            overflow:hidden; 
             cursor:pointer;
-            margin-bottom:6px;  /* Reduced from 8px (25% decrease) */
+            min-width: 300px;  /* Ensure progress bar doesn't get too small */
         }
-
-        .progress {
-            height:100%;
-            background:#1db954;
-            width:0%;
-            transition:width 0.2s linear;
+        .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
+        .time { 
+            display:flex; 
+            justify-content:space-between; 
+            font-size:0.95em;  /* Increased from 0.8em */
+            color:#aaa; 
+            margin-top:6px;  /* Added spacing */
         }
-
-        .time {
-            display:flex;
-            justify-content:space-between;
-            font-size:0.8em;  /* Reduced from 1em (20% decrease) */
-            color:#aaa;
+        .controls { margin-top:20px; display:flex; gap:20px; }
+        .btn { 
+            background:rgba(255,255,255,0.1); 
+            border:none; 
+            color:white; 
+            padding:12px 20px;  /* Increased padding from 10px 15px */
+            border-radius:10px; 
+            cursor:pointer; 
+            font-size:1.2em;  /* Increased from 1em */
+            transition:all 0.2s ease;
         }
-
-        .controls {
-            margin-top:20px;  /* Reduced from 25px (20% decrease) */
-            display:flex;
-            gap:20px;  /* Reduced from 25px (20% decrease) */
+        .btn:hover { background:rgba(255,255,255,0.25); transform:scale(1.05); }  /* Added scale effect */
+        .meta { 
+            margin-top:12px;  /* Increased from 10px */
+            font-size:0.95em;  /* Increased from 0.85em */
+            color:#bbb; 
         }
-
-        .btn {
-            background:rgba(255,255,255,0.1);
-            border:none;
-            color:white;
-            padding:10px 14px;  /* Reduced from 12px 18px (~20% decrease) */
-            border-radius:10px;  /* Reduced from 12px (~17% decrease) */
-            cursor:pointer;
-            font-size:0.96em;  /* Reduced from 1.2em (20% decrease) */
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .card { flex-direction: column; align-items: center; gap:20px; padding:20px; }
+            .art { width:220px; }  /* Adjusted for mobile - increased from 200px */
+            .track { font-size:1.7em; text-align:center; }  /* Adjusted for mobile (decreased from 1.8em) */
+            .artist { font-size:1.2em; text-align:center; }
+            .album { font-size:1.0em; text-align:center; }
+            .info { min-width: 280px; }  /* Slightly smaller minimum on mobile */
+            .btn { padding:10px 16px; font-size:1.1em; }
+            .time { font-size:0.9em; }
+            .meta { font-size:0.9em; }
         }
-
-        .btn:hover {
-            background:rgba(255,255,255,0.25);
-        }
-
-        .meta {
-            margin-top:12px;  /* Reduced from 15px (20% decrease) */
-            font-size:0.8em;  /* Reduced from 1em (20% decrease) */
-            color:#bbb;
+        
+        /* Extra large screens */
+        @media (min-width: 1600px) {
+            .art { width:380px; }  /* Even larger on big screens */
+            .track { font-size:2.6em; }  /* Decreased from 2.8em */
+            .artist { font-size:1.5em; }
+            .album { font-size:1.4em; }
         }
     </style>
 </head>
