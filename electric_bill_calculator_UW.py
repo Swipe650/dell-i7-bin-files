@@ -1,10 +1,10 @@
 import tkinter as tk
 from tkinter import messagebox
 
-# Utility Warehouse rates (pence)
-DAY_RATE_P = 40.42
-NIGHT_RATE_P = 5.697
-STANDING_CHARGE_P = 53.535
+# Utility Warehouse rates (pence) Fixed Start 80 1/4/26 - 31/3/27
+DAY_RATE_P = 36.621
+NIGHT_RATE_P = 6.916
+STANDING_CHARGE_P = 56.972
 
 # Convert to pounds
 DAY_RATE = DAY_RATE_P / 100
@@ -54,7 +54,7 @@ root.resizable(False, False)
 frame = tk.Frame(root, padx=15, pady=15)
 frame.pack()
 
-tk.Label(frame, text="UW SVR Bill Calculator", font=("Arial", 14, "bold")).grid(
+tk.Label(frame, text="UW Fixed Start 80 Calculator", font=("Arial", 14, "bold")).grid(
     row=0, column=0, columnspan=3, pady=10
 )
 
