@@ -27,9 +27,10 @@ def calculate_bill():
         
         # Calculate average unit cost (total energy cost excluding standing charge / total kWh)
         if total_kwh > 0:
-            avg_unit_cost = (day_cost + night_cost) / total_kwh
+            avg_unit_cost_pounds = (day_cost + night_cost) / total_kwh
+            avg_unit_cost_pence = avg_unit_cost_pounds * 100  # Convert to pence
         else:
-            avg_unit_cost = 0.0
+            avg_unit_cost_pence = 0.0
 
         result_text = (
             f"Day rate ({DAY_RATE_P}p)        : £{day_cost:.2f}\n"
@@ -37,7 +38,7 @@ def calculate_bill():
             f"Standing charge ({STANDING_CHARGE_P}p) : £{standing_cost:.2f}\n"
             "-----------------------------------\n"
             f"Total kWh used            : {total_kwh:.2f}\n"
-            f"Average cost per kWh      : £{avg_unit_cost:.4f}\n"
+            f"Average cost per kWh      : {avg_unit_cost_pence:.3f}p\n"
             "-----------------------------------\n"
             f"Total cost                : £{total_cost:.2f}"
         )
