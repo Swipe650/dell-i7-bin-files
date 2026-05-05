@@ -3,6 +3,7 @@ eventlet.monkey_patch()  # Must be the very first thing
 
 import time
 import requests
+import re
 from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO
 
@@ -24,119 +25,90 @@ HTML_TEMPLATE = """
         body { margin:0; font-family:-apple-system; color:white; overflow:hidden; }
         .bg { position:fixed; width:100%; height:100%; background-size:cover; filter:blur(10px) brightness(0.35); z-index:-1; transition: background-image 0.5s ease; }
         .overlay { display:flex; height:100vh; align-items:center; justify-content:center; }
-        .card { 
-            display:flex; 
-            gap:46px;
-            background:rgba(0,0,0,0.4); 
-            padding:34.5px;
-            border-radius:23px;
-            backdrop-filter:blur(20px); 
-            max-width:90vw; 
-            min-width: 800px;
-        }
-        .art { 
-            width:288px;
-            border-radius:16px; 
-            transition: transform 0.3s ease;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-        .art:hover {
-            transform: scale(1.02);
-        }
+        .card { display:flex; gap:40px; background:rgba(0,0,0,0.4); padding:30px; border-radius:20px; backdrop-filter:blur(20px); max-width:90vw; }
+        .art { width:260px; border-radius:16px; }
         .info { 
             display:flex; 
             flex-direction:column; 
             justify-content:center; 
-            min-width: 460px;
+            min-width: 400px;  /* Set minimum width to match previous fixed size */
             flex: 1;
         }
         .track { 
-            font-size:1.955em;  /* Decreased from 2.3em (15% reduction) */
-            font-weight:600;
+            font-size:2em; 
             word-break:break-word; 
             overflow-wrap:break-word;
-            margin-bottom:8px;
         }
-        .artist { 
-            font-size:1.19em;  /* Decreased from 1.4em (15% reduction) */
-            color:#ccc; 
-            margin-bottom:4px;
-        }
-        .album { 
-            font-size:1.02em;  /* Decreased from 1.2em (15% reduction) */
-            color:#999; 
-            margin-bottom:23px;
+        .artist { color:#ccc; }
+        .album { color:#999; margin-bottom:20px; }
+        .playing-from {
+            font-size:0.9em;
+            #color:#1db954;
+            margin-top:5px;
+            margin-bottom:10px;
+            display:flex;
+            align-items:center;
+            gap:8px;
         }
         .progress-container { 
-            width:100%;
+            width:100%;  /* Dynamic width - fills the container */
             height:6px; 
             background:rgba(255,255,255,0.2); 
             border-radius:10px; 
             overflow:hidden; 
             cursor:pointer;
-            min-width: 345px;
+            min-width: 300px;  /* Ensure progress bar doesn't get too small */
         }
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
-        .time { 
-            display:flex; 
-            justify-content:space-between; 
-            font-size:0.8075em;  /* Decreased from 0.95em (15% reduction) */
-            color:#aaa; 
-            margin-top:6.9px;
-        }
-        .controls { margin-top:23px; display:flex; gap:23px; }
-        .btn { 
-            background:rgba(255,255,255,0.1); 
-            border:none; 
-            color:white; 
-            padding:13.8px 23px;
-            border-radius:11.5px;
-            cursor:pointer; 
-            font-size:1.02em;  /* Decreased from 1.2em (15% reduction) */
-            transition:all 0.2s ease;
-        }
-        .btn:hover { background:rgba(255,255,255,0.25); transform:scale(1.05); }
+        .time { display:flex; justify-content:space-between; font-size:0.8em; color:#aaa; }
+        .controls { margin-top:20px; display:flex; gap:20px; }
+        .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; }
+        .btn:hover { background:rgba(255,255,255,0.25); }
         .meta { 
-            margin-top:13.8px;
-            font-size:0.8075em;  /* Decreased from 0.95em (15% reduction) */
-            color:#bbb; 
+            margin-top:10px; 
+            font-size:0.85em; 
+            color:#bbb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .bitrate {
+            font-size:0.95em;
+            font-family: monospace;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            padding: 4px 10px;
+            border-radius: 12px;
+            backdrop-filter: blur(8px);
+            display: inline-block;
+        }
+        .bitrate-16bit {
+            color: #40E0D0;  /* Turquoise */
+            background-color: rgba(64, 224, 208, 0.10);
+            box-shadow: 0 0 5px rgba(64, 224, 208, 0.2);
+        }
+        .bitrate-24bit {
+            color: #FFB347;  /* Light orange */
+            background-color: rgba(255, 179, 71, 0.10);
+            box-shadow: 0 0 5px rgba(255, 179, 71, 0.2);
+        }
+        .bitrate-gray {
+            color: #888888;  /* Gray for low quality or kbps */
+            background-color: rgba(136, 136, 136, 0.10);
+            box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
         }
         
         /* Responsive adjustments */
-        @media (max-width: 900px) {
-            .card { 
-                flex-direction: column; 
-                align-items: center; 
-                gap:23px; 
-                padding:23px; 
-                min-width: auto;
-            }
-            .art { width:216px; }
-            .track { font-size:1.445em; text-align:center; }  /* Decreased from 1.7em (15% reduction) */
-            .artist { font-size:1.02em; text-align:center; }  /* Decreased from 1.2em (15% reduction) */
-            .album { font-size:0.85em; text-align:center; }  /* Decreased from 1.0em (15% reduction) */
-            .info { min-width: 322px; }
-            .btn { padding:11.5px 18.4px; font-size:0.935em; }  /* Decreased from 1.1em (15% reduction) */
-            .time { font-size:0.765em; }  /* Decreased from 0.9em (15% reduction) */
-            .meta { font-size:0.765em; }  /* Decreased from 0.9em (15% reduction) */
-            .progress-container { min-width: 276px; }
-        }
-        
-        /* Extra large screens */
-        @media (min-width: 1600px) {
-            .art { width:342px; }
-            .track { font-size:2.295em; }  /* Decreased from 2.7em (15% reduction) */
-            .artist { font-size:1.36em; }  /* Decreased from 1.6em (15% reduction) */
-            .album { font-size:1.19em; }  /* Decreased from 1.4em (15% reduction) */
-            .card { 
-                gap:52.9px;
-                padding:39.7px;
-            }
-            .info { min-width: 529px; }
-            .progress-container { min-width: 396.75px; }
-            .btn { font-size:1.02em; }
-            .time { font-size:0.8075em; }
-            .meta { font-size:0.8075em; }
+        @media (max-width: 768px) {
+            .card { flex-direction: column; align-items: center; gap:20px; padding:20px; }
+            .art { width:200px; }
+            .track { font-size:1.5em; text-align:center; }
+            .artist, .album { text-align:center; }
+            .playing-from { justify-content:center; }
+            .info { min-width: 280px; }  /* Slightly smaller minimum on mobile */
+            .meta { flex-direction: column; gap: 5px; text-align: center; }
+            .bitrate { margin-top: 5px; }
         }
     </style>
 </head>
@@ -149,6 +121,7 @@ HTML_TEMPLATE = """
                 <div id="track" class="track"></div>
                 <div id="artist" class="artist"></div>
                 <div id="album" class="album"></div>
+                <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
                     <div id="progress" class="progress"></div>
                 </div>
@@ -161,7 +134,10 @@ HTML_TEMPLATE = """
                     <button class="btn" onclick="control('playpause')">⏯</button>
                     <button class="btn" onclick="control('next')">⏭</button>
                 </div>
-                <div id="meta" class="meta"></div>
+                <div class="meta">
+                    <span id="metaText"></span>
+                    <span id="bitrate" class="bitrate"></span>
+                </div>
             </div>
         </div>
     </div>
@@ -169,14 +145,44 @@ HTML_TEMPLATE = """
 const socket = io();
 let trackDurationSec = 0;
 
+function updateBitrateColor(bitrateText) {
+    const bitrateElement = document.getElementById('bitrate');
+    // Remove existing classes
+    bitrateElement.classList.remove('bitrate-16bit', 'bitrate-24bit', 'bitrate-gray');
+    
+    // Check if it contains 'kbps' (MP3 or lossy format)
+    if (bitrateText.toLowerCase().includes('kbps')) {
+        bitrateElement.classList.add('bitrate-gray');
+    }
+    // Check for 16-bit
+    else if (bitrateText.includes('16-bit')) {
+        bitrateElement.classList.add('bitrate-16bit');
+    }
+    // Check for 24-bit or higher
+    else if (bitrateText.includes('24-bit') || bitrateText.includes('32-bit')) {
+        bitrateElement.classList.add('bitrate-24bit');
+    }
+    // Check for less than 16-bit (e.g., 8-bit)
+    else if (bitrateText.includes('8-bit') || bitrateText.includes('12-bit')) {
+        bitrateElement.classList.add('bitrate-gray');
+    }
+    // Default to gray for anything else
+    else {
+        bitrateElement.classList.add('bitrate-gray');
+    }
+}
+
 socket.on('update', (data) => {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
     document.getElementById('album').innerText = data.album;
+    document.getElementById('playingFrom').innerHTML = data.playing_from;
     document.getElementById('current').innerText = data.current;
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
-    document.getElementById('meta').innerText = `Volume: ${data.volume}% | Shuffle: ${data.shuffle} | Repeat: ${data.repeat}`;
+    document.getElementById('metaText').innerText = `Volume: ${data.volume}% | Shuffle: ${data.shuffle} | Repeat: ${data.repeat}`;
+    document.getElementById('bitrate').innerText = data.bitrate;
+    updateBitrateColor(data.bitrate);
     document.getElementById('art').src = data.art;
     document.getElementById('bg').style.backgroundImage = `url('${data.art}')`;
     document.getElementById('page-title').innerText = `${data.artist} - ${data.track}`;
@@ -210,6 +216,18 @@ def get_current_track():
         current_sec = data.get("currentInSeconds", 0)
         duration_sec = data.get("durationInSeconds", 1)
         progress = (current_sec / duration_sec) * 100 if duration_sec else 0
+        
+        # Get playing from directly from the API response
+        playing_from_raw = data.get("playingFrom", "Unknown Source")
+        playing_from = f"Playing from: {playing_from_raw}"
+        
+        # Get bitrate - first try API, fallback to default assumption
+        bitrate = data.get("bitrate", "16-bit 44.1kHz")  # Default assumption until API provides it
+        
+        # Optional: Format bitrate nicely if it's just a number (kbps)
+        if isinstance(bitrate, (int, float)):
+            bitrate = f"{bitrate} kbps"
+        
         return {
             "track": data.get("title"),
             "artist": data.get("artist"),
@@ -221,7 +239,9 @@ def get_current_track():
             "progress": progress,
             "volume": round(data.get("volume", 0) * 100),
             "shuffle": data.get("player", {}).get("shuffle"),
-            "repeat": data.get("player", {}).get("repeat")
+            "repeat": data.get("player", {}).get("repeat"),
+            "playing_from": playing_from,
+            "bitrate": bitrate
         }
     except Exception as e:
         print("ERROR:", e)
