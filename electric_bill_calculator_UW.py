@@ -22,11 +22,22 @@ def calculate_bill():
         night_cost = NIGHT_RATE * night_usage
         standing_cost = STANDING_CHARGE * num_days
         total_cost = day_cost + night_cost + standing_cost
+        
+        total_kwh = day_usage + night_usage
+        
+        # Calculate average unit cost (total energy cost excluding standing charge / total kWh)
+        if total_kwh > 0:
+            avg_unit_cost = (day_cost + night_cost) / total_kwh
+        else:
+            avg_unit_cost = 0.0
 
         result_text = (
             f"Day rate ({DAY_RATE_P}p)        : £{day_cost:.2f}\n"
             f"Night rate ({NIGHT_RATE_P}p)       : £{night_cost:.2f}\n"
             f"Standing charge ({STANDING_CHARGE_P}p) : £{standing_cost:.2f}\n"
+            "-----------------------------------\n"
+            f"Total kWh used            : {total_kwh:.2f}\n"
+            f"Average cost per kWh      : £{avg_unit_cost:.4f}\n"
             "-----------------------------------\n"
             f"Total cost                : £{total_cost:.2f}"
         )
