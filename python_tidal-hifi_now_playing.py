@@ -71,6 +71,8 @@ HTML_TEMPLATE = """
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
         }
         .bitrate {
             font-size:0.95em;
@@ -82,6 +84,32 @@ HTML_TEMPLATE = """
             border-radius: 12px;
             backdrop-filter: blur(8px);
             display: inline-block;
+        }
+        .quality-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .quality-HI_RES_LOSSLESS {
+            background: linear-gradient(135deg, #FFB347, #FF8C00);
+            color: white;
+            text-shadow: 0 0 2px rgba(0,0,0,0.3);
+        }
+        .quality-LOSSLESS {
+            background: linear-gradient(135deg, #40E0D0, #00B4D8);
+            color: white;
+        }
+        .quality-HIGH {
+            background: #666;
+            color: #eee;
+        }
+        .quality-LOW {
+            background: #444;
+            color: #999;
         }
         .bitrate-16bit {
             color: #40E0D0;  /* Turquoise */
@@ -97,6 +125,13 @@ HTML_TEMPLATE = """
             color: #888888;  /* Gray for low quality or kbps */
             background-color: rgba(136, 136, 136, 0.10);
             box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
+        }
+        .codec-badge {
+            font-size: 0.75em;
+            padding: 2px 6px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            font-family: monospace;
         }
         
         /* Responsive adjustments */
@@ -135,7 +170,11 @@ HTML_TEMPLATE = """
                     <button class="btn" onclick="control('next')">⏭</button>
                 </div>
                 <div class="meta">
-                    <span id="metaText"></span>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                        <span id="metaText"></span>
+                        <span id="qualityBadge" class="quality-badge"></span>
+                        <span id="codecBadge" class="codec-badge"></span>
+                    </div>
                     <span id="bitrate" class="bitrate"></span>
                 </div>
             </div>
@@ -145,34 +184,38 @@ HTML_TEMPLATE = """
 const socket = io();
 let trackDurationSec = 0;
 
-function updateBitrateColor(bitrateText) {
+function updateBitrateColor(bitDepth, sampleRate) {
     const bitrateElement = document.getElementById('bitrate');
     // Remove existing classes
     bitrateElement.classList.remove('bitrate-16bit', 'bitrate-24bit', 'bitrate-gray');
     
-    // Check if it contains 'kbps' (MP3 or lossy format)
-    if (bitrateText.toLowerCase().includes('kbps')) {
-        bitrateElement.classList.add('bitrate-gray');
-    }
-    // Check for 16-bit
-    else if (bitrateText.includes('16-bit')) {
-        bitrateElement.classList.add('bitrate-16bit');
-    }
-    // Check for 24-bit or higher
-    else if (bitrateText.includes('24-bit') || bitrateText.includes('32-bit')) {
+    // Update based on bit depth
+    if (bitDepth >= 24) {
         bitrateElement.classList.add('bitrate-24bit');
     }
-    // Check for less than 16-bit (e.g., 8-bit)
-    else if (bitrateText.includes('8-bit') || bitrateText.includes('12-bit')) {
+    else if (bitDepth >= 16) {
+        bitrateElement.classList.add('bitrate-16bit');
+    }
+    else if (bitDepth > 0 && bitDepth < 16) {
         bitrateElement.classList.add('bitrate-gray');
     }
-    // Default to gray for anything else
+    // Default to gray for missing data
     else {
         bitrateElement.classList.add('bitrate-gray');
     }
 }
 
-socket.on('update', (data) => {
+function getQualityBadgeText(quality) {
+    const qualityMap = {
+        'HI_RES_LOSSLESS': 'MAX',
+        'LOSSLESS': 'HiFi',
+        'HIGH': 'HIGH',
+        'LOW': 'LOW'
+    };
+    return qualityMap[quality] || quality;
+}
+
+function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
     document.getElementById('album').innerText = data.album;
@@ -180,15 +223,42 @@ socket.on('update', (data) => {
     document.getElementById('current').innerText = data.current;
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
-    document.getElementById('metaText').innerText = `Volume: ${data.volume}% | Shuffle: ${data.shuffle} | Repeat: ${data.repeat}`;
-    document.getElementById('bitrate').innerText = data.bitrate;
-    updateBitrateColor(data.bitrate);
+    document.getElementById('metaText').innerHTML = `💿 Volume: ${data.volume}% | 🔀 Shuffle: ${data.shuffle} | 🔁 Repeat: ${data.repeat}`;
+    
+    // Update bitrate display with new structured data
+    const bitrateText = data.badgeText || `${data.bitDepth}-bit ${data.sampleRate/1000}kHz`;
+    document.getElementById('bitrate').innerText = bitrateText;
+    updateBitrateColor(data.bitDepth, data.sampleRate);
+    
+    // Update quality badge
+    const qualityBadge = document.getElementById('qualityBadge');
+    if (data.quality && data.quality !== 'UNKNOWN') {
+        qualityBadge.innerText = getQualityBadgeText(data.quality);
+        qualityBadge.className = `quality-badge quality-${data.quality}`;
+        qualityBadge.style.display = 'inline-flex';
+    } else {
+        qualityBadge.style.display = 'none';
+    }
+    
+    // Update codec badge
+    const codecBadge = document.getElementById('codecBadge');
+    if (data.codec) {
+        codecBadge.innerText = data.codec;
+        codecBadge.style.display = 'inline-block';
+    } else {
+        codecBadge.style.display = 'none';
+    }
+    
     document.getElementById('art').src = data.art;
     document.getElementById('bg').style.backgroundImage = `url('${data.art}')`;
     document.getElementById('page-title').innerText = `${data.artist} - ${data.track}`;
     document.getElementById('favicon').href = data.art;
 
     trackDurationSec = data.duration_sec || trackDurationSec;
+}
+
+socket.on('update', (data) => {
+    updateUI(data);
 });
 
 function control(action) {
@@ -221,12 +291,32 @@ def get_current_track():
         playing_from_raw = data.get("playingFrom", "Unknown Source")
         playing_from = f"Playing from: {playing_from_raw}"
         
-        # Get bitrate - first try API, fallback to default assumption
-        bitrate = data.get("bitrate", "16-bit 44.1kHz")  # Default assumption until API provides it
+        # Extract audio quality information
+        audio_quality = data.get("audioQuality", {})
         
-        # Optional: Format bitrate nicely if it's just a number (kbps)
-        if isinstance(bitrate, (int, float)):
-            bitrate = f"{bitrate} kbps"
+        # Handle both old and new API formats
+        if audio_quality:
+            # New format with structured audio quality
+            quality = audio_quality.get("quality", "UNKNOWN")
+            badge_text = audio_quality.get("badgeText", "")
+            bit_depth = audio_quality.get("bitDepth", 0)
+            sample_rate = audio_quality.get("sampleRate", 0)
+            codec = audio_quality.get("codec", "")
+            
+            # Format badge text if missing
+            if not badge_text and bit_depth and sample_rate:
+                badge_text = f"{bit_depth}-bit {sample_rate//1000}kHz"
+            elif not badge_text and quality == "HI_RES_LOSSLESS":
+                badge_text = "24-bit 96kHz"  # Default assumption
+            elif not badge_text and quality == "LOSSLESS":
+                badge_text = "16-bit 44.1kHz"
+        else:
+            # Fallback to old format or default
+            quality = "UNKNOWN"
+            badge_text = data.get("bitrate", "16-bit 44.1kHz")
+            bit_depth = 16 if "16-bit" in badge_text else (24 if "24-bit" in badge_text else 0)
+            sample_rate = 44100 if "44.1" in badge_text else (96000 if "96" in badge_text else 0)
+            codec = "FLAC" if "FLAC" in badge_text or "lossless" in str(data).lower() else "AAC"
         
         return {
             "track": data.get("title"),
@@ -238,10 +328,17 @@ def get_current_track():
             "duration_sec": duration_sec,
             "progress": progress,
             "volume": round(data.get("volume", 0) * 100),
-            "shuffle": data.get("player", {}).get("shuffle"),
-            "repeat": data.get("player", {}).get("repeat"),
+            "shuffle": str(data.get("player", {}).get("shuffle", False)),
+            "repeat": str(data.get("player", {}).get("repeat", "OFF")),
             "playing_from": playing_from,
-            "bitrate": bitrate
+            # New audio quality fields
+            "quality": quality,
+            "badgeText": badge_text,
+            "bitDepth": bit_depth,
+            "sampleRate": sample_rate,
+            "codec": codec,
+            # Keep for backward compatibility
+            "bitrate": badge_text
         }
     except Exception as e:
         print("ERROR:", e)
@@ -249,7 +346,9 @@ def get_current_track():
 
 def background_task():
     while True:
-        socketio.emit('update', get_current_track())
+        track_data = get_current_track()
+        if track_data:
+            socketio.emit('update', track_data)
         socketio.sleep(POLL_INTERVAL)
 
 @app.route('/')
