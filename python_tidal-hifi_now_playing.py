@@ -113,17 +113,17 @@ HTML_TEMPLATE = """
         }
         .bitrate-16bit {
             color: #40E0D0;  /* Turquoise */
-            background-color: rgba(64, 224, 208, 0.10);
+            background-color: rgba(64, 224, 208, 0.20);
             box-shadow: 0 0 5px rgba(64, 224, 208, 0.2);
         }
         .bitrate-24bit {
             color: #FFB347;  /* Light orange */
-            background-color: rgba(255, 179, 71, 0.10);
+            background-color: rgba(255, 179, 71, 0.20);
             box-shadow: 0 0 5px rgba(255, 179, 71, 0.2);
         }
         .bitrate-gray {
             color: #888888;  /* Gray for low quality or kbps */
-            background-color: rgba(136, 136, 136, 0.10);
+            background-color: rgba(136, 136, 136, 0.20);
             box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
         }
         .codec-badge {
@@ -318,6 +318,10 @@ def get_current_track():
             sample_rate = 44100 if "44.1" in badge_text else (96000 if "96" in badge_text else 0)
             codec = "FLAC" if "FLAC" in badge_text or "lossless" in str(data).lower() else "AAC"
         
+        # Convert shuffle boolean to "On"/"Off"
+        shuffle_raw = data.get("player", {}).get("shuffle", False)
+        shuffle_display = "on" if shuffle_raw else "off"
+        
         return {
             "track": data.get("title"),
             "artist": data.get("artist"),
@@ -328,7 +332,7 @@ def get_current_track():
             "duration_sec": duration_sec,
             "progress": progress,
             "volume": round(data.get("volume", 0) * 100),
-            "shuffle": str(data.get("player", {}).get("shuffle", False)),
+            "shuffle": shuffle_display,
             "repeat": str(data.get("player", {}).get("repeat", "OFF")),
             "playing_from": playing_from,
             # New audio quality fields
