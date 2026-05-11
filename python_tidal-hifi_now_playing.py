@@ -190,25 +190,24 @@ function getQualityDisplay(quality) {
 }
 
 function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
-    // Priority 1: Use badgeText if it exists and looks like a valid bitrate string
-    if (badgeText && (badgeText.includes('bit') || badgeText.includes('kHz'))) {
+    // Check if badgeText contains actual bitrate info (bit/kHz/kbps)
+    const hasBitrateInfo = badgeText && (badgeText.includes('bit') || badgeText.includes('kHz') || badgeText.includes('kbps'));
+    
+    if (hasBitrateInfo) {
+        // Use the badgeText from API (e.g., "24-bit 96kHz", "96 kbps")
         return badgeText;
     }
     
-    // Priority 2: Use bitDepth and sampleRate if available
-    if (bitDepth && sampleRate) {
-        return `${bitDepth}-bit ${sampleRate/1000}kHz`;
+    // No detailed bitrate info, use defaults based on quality
+    if (quality === 'max' || quality === 'hi_res_lossless') {
+        return '24-bit 44.1kHz';
+    } else if (quality === 'high' || quality === 'lossless') {
+        return '16-bit 44.1kHz';
+    } else if (quality === 'low') {
+        return '96 kbps';
     }
     
-    // Priority 3: Fallback to quality mapping (using 44.1kHz for MAX as default)
-    const bitrateMap = {
-        'hi_res_lossless': '24-bit 44.1kHz',
-        'max': '24-bit 44.1kHz',
-        'lossless': '16-bit 44.1kHz',
-        'high': '16-bit 44.1kHz',
-        'low': '320 kbps'
-    };
-    return bitrateMap[quality] || 'Unknown Quality';
+    return 'Unknown Quality';
 }
 
 function updateUI(data) {
@@ -286,11 +285,11 @@ def get_current_track():
         
         # Map to standard quality types
         if quality_raw in ["hi_res_lossless", "max"]:
-            quality = "hi_res_lossless"  # MAX quality
+            quality = "max"  # MAX quality
         elif quality_raw in ["lossless", "high"]:
-            quality = "lossless"  # HIGH quality (16-bit)
+            quality = "high"  # HIGH quality (16-bit)
         elif quality_raw == "low":
-            quality = "low"  # LOW quality (320 kbps)
+            quality = "low"  # LOW quality
         else:
             quality = "low"  # Default
         
@@ -299,15 +298,8 @@ def get_current_track():
         sample_rate = audio_quality.get("sampleRate", 0)
         codec = audio_quality.get("codec", "")
         
-        # Get badgeText if available (this has the exact formatted string)
+        # Get badgeText if available
         badge_text = audio_quality.get("badgeText", "")
-        
-        # If we have sample_rate but no bit_depth, try to infer bit depth from quality
-        if sample_rate and not bit_depth:
-            if quality == "hi_res_lossless":
-                bit_depth = 24
-            elif quality == "lossless":
-                bit_depth = 16
         
         # Convert shuffle boolean to "on"/"off"
         shuffle_raw = data.get("player", {}).get("shuffle", False)
