@@ -111,6 +111,16 @@ HTML_TEMPLATE = """
             background-color: rgba(136, 136, 136, 0.20);
             box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
         }
+        .clickable {
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 8px;
+            transition: background-color 0.2s ease;
+            display: inline-block;
+        }
+        .clickable:hover {
+            background-color: rgba(255,255,255,0.2);
+        }
         
         /* Responsive adjustments */
         @media (max-width: 768px) {
@@ -217,6 +227,34 @@ function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
     return 'Unknown Quality';
 }
 
+function toggleShuffle() {
+    fetch('/toggle_shuffle', { method: 'POST' })
+        .then(response => {
+            if (response.ok) {
+                console.log('Shuffle toggled');
+                // Refresh the current track data after a short delay
+                setTimeout(() => {
+                    location.reload();
+                }, 100);
+            }
+        })
+        .catch(error => console.error('Error toggling shuffle:', error));
+}
+
+function toggleRepeat() {
+    fetch('/toggle_repeat', { method: 'POST' })
+        .then(response => {
+            if (response.ok) {
+                console.log('Repeat toggled');
+                // Refresh the current track data after a short delay
+                setTimeout(() => {
+                    location.reload();
+                }, 100);
+            }
+        })
+        .catch(error => console.error('Error toggling repeat:', error));
+}
+
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
@@ -225,7 +263,10 @@ function updateUI(data) {
     document.getElementById('current').innerText = data.current;
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
-    document.getElementById('metaText').innerHTML = `💿 Volume: ${data.volume}% | 🔀 Shuffle: ${data.shuffle} | 🔁 Repeat: ${data.repeat}`;
+    
+    // Make shuffle and repeat text clickable
+    const metaTextElement = document.getElementById('metaText');
+    metaTextElement.innerHTML = `💿 Volume: ${data.volume}% | 🔀 <span class="clickable" onclick="toggleShuffle()">Shuffle: ${data.shuffle}</span> | 🔁 <span class="clickable" onclick="toggleRepeat()">Repeat: ${data.repeat}</span>`;
     
     // Update quality badge
     const qualityBadge = document.getElementById('qualityBadge');
@@ -313,6 +354,9 @@ def get_current_track():
         shuffle_raw = data.get("player", {}).get("shuffle", False)
         shuffle_display = "on" if shuffle_raw else "off"
         
+        # Get repeat status
+        repeat = data.get("player", {}).get("repeat", "OFF")
+        
         return {
             "track": data.get("title"),
             "artist": data.get("artist"),
@@ -324,7 +368,7 @@ def get_current_track():
             "progress": progress,
             "volume": round(data.get("volume", 0) * 100),
             "shuffle": shuffle_display,
-            "repeat": str(data.get("player", {}).get("repeat", "OFF")),
+            "repeat": repeat,
             "playing_from": playing_from,
             "quality_raw": quality_raw,  # Pass the original API value
             "quality": quality,  # Internal mapping for color coding
@@ -366,6 +410,28 @@ def control(action):
     except Exception as e:
         print("CONTROL ROUTE ERROR:", e)
     return ('', 204)
+
+@app.route('/toggle_shuffle', methods=['POST'])
+def toggle_shuffle():
+    try:
+        url = f"{BASE_URL}/player/shuffle/toggle"
+        response = requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=2)
+        print(f"Shuffle toggled, response: {response.status_code}")
+        return ('', 204)
+    except Exception as e:
+        print("SHUFFLE ERROR:", e)
+        return ('', 500)
+
+@app.route('/toggle_repeat', methods=['POST'])
+def toggle_repeat():
+    try:
+        url = f"{BASE_URL}/player/repeat/toggle"
+        response = requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=2)
+        print(f"Repeat toggled, response: {response.status_code}")
+        return ('', 204)
+    except Exception as e:
+        print("REPEAT ERROR:", e)
+        return ('', 500)
 
 @app.route('/seek/<int:seconds>', methods=['PUT'])
 def seek(seconds):
