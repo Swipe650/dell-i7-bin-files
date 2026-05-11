@@ -3,17 +3,37 @@ eventlet.monkey_patch()  # Must be the very first thing
 
 import time
 import requests
-import re
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
-
+# ========== CONFIGURATION ==========
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
+REQUEST_TIMEOUT = 2
+SEEK_DELAY_MS = 100
 
+# Quality mappings
+QUALITY_INTERNAL_MAP = {
+    'hi_res_lossless': 'hi_res_lossless',
+    'max': 'hi_res_lossless',
+    'lossless': 'lossless',
+    'high': 'lossless',
+    'low': 'low'
+}
+
+# Bitrate defaults (used when API doesn't provide detailed info)
+BITRATE_DEFAULTS = {
+    'hi_res_lossless': '24-bit 44.1kHz',
+    'lossless': '16-bit 44.1kHz',
+    'low': '96 kbps'
+}
+
+# ========== FLASK APP INITIALIZATION ==========
+app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# ========== HTML TEMPLATE ==========
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -97,17 +117,17 @@ HTML_TEMPLATE = """
             display: inline-block;
         }
         .bitrate-max {
-            color: #FFB347;  /* Light orange */
+            color: #FFB347;
             background-color: rgba(255, 179, 71, 0.20);
             box-shadow: 0 0 5px rgba(255, 179, 71, 0.2);
         }
         .bitrate-high {
-            color: #40E0D0;  /* Turquoise */
+            color: #40E0D0;
             background-color: rgba(64, 224, 208, 0.20);
             box-shadow: 0 0 5px rgba(64, 224, 208, 0.2);
         }
         .bitrate-low {
-            color: #888888;  /* Gray */
+            color: #888888;
             background-color: rgba(136, 136, 136, 0.20);
             box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
         }
@@ -122,7 +142,6 @@ HTML_TEMPLATE = """
             background-color: rgba(255,255,255,0.2);
         }
         
-        /* Responsive adjustments */
         @media (max-width: 768px) {
             .card { flex-direction: column; align-items: center; gap:20px; padding:20px; }
             .art { width:200px; }
@@ -171,62 +190,54 @@ HTML_TEMPLATE = """
 const socket = io();
 let trackDurationSec = 0;
 
+// Quality display mapping
+const QUALITY_DISPLAY_MAP = {
+    'HI_RES_LOSSLESS': 'HI_RES_LOSSLESS',
+    'LOSSLESS': 'LOSSLESS',
+    'max': 'HI_RES_LOSSLESS',
+    'high': 'LOSSLESS',
+    'low': 'Low'
+};
+
+// Bitrate defaults
+const BITRATE_DEFAULTS = {
+    'hi_res_lossless': '24-bit 44.1kHz',
+    'lossless': '16-bit 44.1kHz',
+    'low': '96 kbps'
+};
+
 function updateBitrateColor(qualityType, bitrateText) {
     const bitrateElement = document.getElementById('bitrate');
-    // Remove existing classes
     bitrateElement.classList.remove('bitrate-max', 'bitrate-high', 'bitrate-low');
     
-    // Add class based on quality type
     if (qualityType === 'max' || qualityType === 'hi_res_lossless') {
-        bitrateElement.classList.add('bitrate-max');    // Orange
+        bitrateElement.classList.add('bitrate-max');
     } else if (qualityType === 'high' || qualityType === 'lossless') {
-        bitrateElement.classList.add('bitrate-high');   // Turquoise
+        bitrateElement.classList.add('bitrate-high');
     } else if (qualityType === 'low') {
-        bitrateElement.classList.add('bitrate-low');    // Gray
+        bitrateElement.classList.add('bitrate-low');
     } else {
-        bitrateElement.classList.add('bitrate-low');    // Default to gray
+        bitrateElement.classList.add('bitrate-low');
     }
 }
 
 function getQualityDisplay(qualityRaw) {
-    // Return the exact API value if it's HI_RES_LOSSLESS or LOSSLESS
-    if (qualityRaw === 'HI_RES_LOSSLESS') {
-        return 'HI_RES_LOSSLESS';
-    }
-    if (qualityRaw === 'LOSSLESS') {
-        return 'LOSSLESS';
-    }
-    
-    // Otherwise use friendly names
-    const qualityMap = {
-        //'max': 'Max',
-        //'high': 'High',
-        'max': 'HI_RES_LOSSLESS',
-        'high': 'LOSSLESS',
-        'low': 'Low'
-    };
-    return qualityMap[qualityRaw] || qualityRaw;
+    return QUALITY_DISPLAY_MAP[qualityRaw] || qualityRaw;
 }
 
 function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
-    // Check if badgeText contains actual bitrate info (bit/kHz/kbps)
-    const hasBitrateInfo = badgeText && (badgeText.includes('bit') || badgeText.includes('kHz') || badgeText.includes('kbps'));
-    
-    if (hasBitrateInfo) {
-        // Use the badgeText from API (e.g., "24-bit 96kHz", "96 kbps")
+    // Priority 1: Use badgeText if it contains actual bitrate info
+    if (badgeText && /(bit|kHz|kbps)/.test(badgeText)) {
         return badgeText;
     }
     
-    // No detailed bitrate info, use defaults based on quality
-    if (quality === 'max' || quality === 'hi_res_lossless') {
-        return '24-bit 44.1kHz';
-    } else if (quality === 'high' || quality === 'lossless') {
-        return '16-bit 44.1kHz';
-    } else if (quality === 'low') {
-        return '96 kbps';
+    // Priority 2: Use bitDepth and sampleRate if available
+    if (bitDepth && sampleRate) {
+        return `${bitDepth}-bit ${sampleRate/1000}kHz`;
     }
     
-    return 'Unknown Quality';
+    // Priority 3: Use defaults based on quality
+    return BITRATE_DEFAULTS[quality] || 'Unknown Quality';
 }
 
 function toggleShuffle() {
@@ -234,10 +245,7 @@ function toggleShuffle() {
         .then(response => {
             if (response.ok) {
                 console.log('Shuffle toggled');
-                // Refresh the current track data after a short delay
-                setTimeout(() => {
-                    location.reload();
-                }, 100);
+                setTimeout(() => location.reload(), 100);
             }
         })
         .catch(error => console.error('Error toggling shuffle:', error));
@@ -248,10 +256,7 @@ function toggleRepeat() {
         .then(response => {
             if (response.ok) {
                 console.log('Repeat toggled');
-                // Refresh the current track data after a short delay
-                setTimeout(() => {
-                    location.reload();
-                }, 100);
+                setTimeout(() => location.reload(), 100);
             }
         })
         .catch(error => console.error('Error toggling repeat:', error));
@@ -266,21 +271,20 @@ function updateUI(data) {
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
     
-    // Make shuffle and repeat text clickable
+    // Make shuffle and repeat clickable
     const metaTextElement = document.getElementById('metaText');
     metaTextElement.innerHTML = `💿 Volume: ${data.volume}% | 🔀 <span class="clickable" onclick="toggleShuffle()">Shuffle: ${data.shuffle}</span> | 🔁 <span class="clickable" onclick="toggleRepeat()">Repeat: ${data.repeat}</span>`;
     
     // Update quality badge
     const qualityBadge = document.getElementById('qualityBadge');
     if (data.quality_raw) {
-        const qualityDisplay = getQualityDisplay(data.quality_raw);
-        qualityBadge.innerText = qualityDisplay;
+        qualityBadge.innerText = getQualityDisplay(data.quality_raw);
         qualityBadge.style.display = 'inline-flex';
     } else {
         qualityBadge.style.display = 'none';
     }
     
-    // Update bitrate display with colored text
+    // Update bitrate display
     const bitrateText = getBitrateText(data.quality, data.bitDepth, data.sampleRate, data.badgeText);
     document.getElementById('bitrate').innerText = bitrateText;
     updateBitrateColor(data.quality, bitrateText);
@@ -316,48 +320,31 @@ progressContainer.addEventListener('click', (e) => {
 </html>
 """
 
+# ========== BACKEND FUNCTIONS ==========
 def get_current_track():
+    """Fetch current track information from Tidal API"""
     try:
-        data = requests.get(CURRENT_URL).json()
+        response = requests.get(CURRENT_URL, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Calculate progress
         current_sec = data.get("currentInSeconds", 0)
         duration_sec = data.get("durationInSeconds", 1)
-        progress = (current_sec / duration_sec) * 100 if duration_sec else 0
+        progress = (current_sec / duration_sec * 100) if duration_sec else 0
         
-        # Get playing from directly from the API response
-        playing_from_raw = data.get("playingFrom", "Unknown Source")
-        playing_from = f"Playing from: {playing_from_raw}"
-        
-        # Extract audio quality information (handles both formats)
+        # Extract audio quality
         audio_quality = data.get("audioQuality", {})
-        
-        # Get the raw quality value from API
         quality_raw = audio_quality.get("quality", "")
-        
-        # Map to internal quality types for color coding and bitrate defaults
         quality_lower = quality_raw.lower()
-        if quality_lower in ["hi_res_lossless", "max"]:
-            quality = "hi_res_lossless"  # MAX quality
-        elif quality_lower in ["lossless", "high"]:
-            quality = "lossless"  # HIGH quality (16-bit)
-        elif quality_lower == "low":
-            quality = "low"  # LOW quality
-        else:
-            quality = "low"  # Default
         
-        # Get detailed info if available
-        bit_depth = audio_quality.get("bitDepth", 0)
-        sample_rate = audio_quality.get("sampleRate", 0)
-        codec = audio_quality.get("codec", "")
+        # Map to internal quality type for color coding
+        quality = QUALITY_INTERNAL_MAP.get(quality_lower, 'low')
         
-        # Get badgeText if available
-        badge_text = audio_quality.get("badgeText", "")
-        
-        # Convert shuffle boolean to "on"/"off"
-        shuffle_raw = data.get("player", {}).get("shuffle", False)
-        shuffle_display = "on" if shuffle_raw else "off"
-        
-        # Get repeat status
-        repeat = data.get("player", {}).get("repeat", "OFF")
+        # Get player state
+        player = data.get("player", {})
+        shuffle_display = "on" if player.get("shuffle") else "off"
+        repeat = player.get("repeat", "OFF")
         
         return {
             "track": data.get("title"),
@@ -371,89 +358,104 @@ def get_current_track():
             "volume": round(data.get("volume", 0) * 100),
             "shuffle": shuffle_display,
             "repeat": repeat,
-            "playing_from": playing_from,
-            "quality_raw": quality_raw,  # Pass the original API value
-            "quality": quality,  # Internal mapping for color coding
-            "bitDepth": bit_depth,
-            "sampleRate": sample_rate,
-            "codec": codec,
-            "badgeText": badge_text
+            "playing_from": f"Playing from: {data.get('playingFrom', 'Unknown Source')}",
+            "quality_raw": quality_raw,
+            "quality": quality,
+            "bitDepth": audio_quality.get("bitDepth", 0),
+            "sampleRate": audio_quality.get("sampleRate", 0),
+            "codec": audio_quality.get("codec", ""),
+            "badgeText": audio_quality.get("badgeText", "")
         }
+    except requests.RequestException as e:
+        print(f"API request failed: {e}")
+        return {}
     except Exception as e:
-        print("ERROR:", e)
+        print(f"Unexpected error in get_current_track: {e}")
         return {}
 
 def background_task():
+    """Background task to poll Tidal API and emit updates"""
     while True:
         track_data = get_current_track()
         if track_data:
             socketio.emit('update', track_data)
         socketio.sleep(POLL_INTERVAL)
 
+# ========== FLASK ROUTES ==========
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/control/<action>', methods=['POST'])
 def control(action):
+    """Handle playback controls"""
+    endpoints = {
+        'playpause': f"{BASE_URL}/player/playpause",
+        'next': f"{BASE_URL}/player/next",
+        'previous': f"{BASE_URL}/player/previous"
+    }
+    
+    url = endpoints.get(action)
+    if not url:
+        return ('', 404)
+    
     try:
-        url = None
-        if action == 'playpause': url = f"{BASE_URL}/player/playpause"
-        elif action == 'next': url = f"{BASE_URL}/player/next"
-        elif action == 'previous': url = f"{BASE_URL}/player/previous"
-        if url:
-            try:
-                requests.post(url, timeout=2)
-            except Exception:
-                try:
-                    requests.get(url, timeout=2)
-                except Exception as e:
-                    print("CONTROL ERROR:", e)
+        # Try POST first, fallback to GET
+        try:
+            requests.post(url, timeout=REQUEST_TIMEOUT)
+        except Exception:
+            requests.get(url, timeout=REQUEST_TIMEOUT)
     except Exception as e:
-        print("CONTROL ROUTE ERROR:", e)
+        print(f"CONTROL ERROR ({action}): {e}")
+    
     return ('', 204)
 
 @app.route('/toggle_shuffle', methods=['POST'])
 def toggle_shuffle():
+    """Toggle shuffle mode"""
     try:
         url = f"{BASE_URL}/player/shuffle/toggle"
-        response = requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=2)
-        print(f"Shuffle toggled, response: {response.status_code}")
+        requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=REQUEST_TIMEOUT)
+        print("Shuffle toggled successfully")
         return ('', 204)
     except Exception as e:
-        print("SHUFFLE ERROR:", e)
+        print(f"SHUFFLE ERROR: {e}")
         return ('', 500)
 
 @app.route('/toggle_repeat', methods=['POST'])
 def toggle_repeat():
+    """Toggle repeat mode"""
     try:
         url = f"{BASE_URL}/player/repeat/toggle"
-        response = requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=2)
-        print(f"Repeat toggled, response: {response.status_code}")
+        requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=REQUEST_TIMEOUT)
+        print("Repeat toggled successfully")
         return ('', 204)
     except Exception as e:
-        print("REPEAT ERROR:", e)
+        print(f"REPEAT ERROR: {e}")
         return ('', 500)
 
 @app.route('/seek/<int:seconds>', methods=['PUT'])
 def seek(seconds):
+    """Seek to specific position in current track"""
+    if seconds < 0:
+        return ('Bad Request', 400)
+    
     try:
         url = f"{BASE_URL}/player/seek/absolute?seconds={seconds}"
         try:
-            requests.put(url, timeout=2)
+            requests.put(url, timeout=REQUEST_TIMEOUT)
         except Exception:
-            try:
-                requests.get(url, timeout=2)
-            except Exception as e:
-                print("SEEK ERROR:", e)
+            requests.get(url, timeout=REQUEST_TIMEOUT)
     except Exception as e:
-        print("SEEK ROUTE ERROR:", e)
+        print(f"SEEK ERROR: {e}")
+    
     return ('', 204)
 
 @socketio.on('connect')
 def connect():
     print("Client connected")
 
+# ========== MAIN ENTRY POINT ==========
 if __name__ == '__main__':
     socketio.start_background_task(background_task)
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
