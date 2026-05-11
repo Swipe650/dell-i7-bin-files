@@ -178,16 +178,22 @@ function updateBitrateColor(qualityType, bitrateText) {
     }
 }
 
-function getQualityDisplay(quality) {
-    // Return the original quality names as they appear in the API
+function getQualityDisplay(qualityRaw) {
+    // Return the exact API value if it's HI_RES_LOSSLESS or LOSSLESS
+    if (qualityRaw === 'HI_RES_LOSSLESS') {
+        return 'HI_RES_LOSSLESS';
+    }
+    if (qualityRaw === 'LOSSLESS') {
+        return 'LOSSLESS';
+    }
+    
+    // Otherwise use friendly names
     const qualityMap = {
-        'hi_res_lossless': 'HI_RES_LOSSLESS',
         'max': 'Max',
-        'lossless': 'LOSSLESS',
         'high': 'High',
         'low': 'Low'
     };
-    return qualityMap[quality] || quality;
+    return qualityMap[qualityRaw] || qualityRaw;
 }
 
 function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
@@ -223,8 +229,8 @@ function updateUI(data) {
     
     // Update quality badge
     const qualityBadge = document.getElementById('qualityBadge');
-    if (data.quality) {
-        const qualityDisplay = getQualityDisplay(data.quality);
+    if (data.quality_raw) {
+        const qualityDisplay = getQualityDisplay(data.quality_raw);
         qualityBadge.innerText = qualityDisplay;
         qualityBadge.style.display = 'inline-flex';
     } else {
@@ -281,15 +287,16 @@ def get_current_track():
         # Extract audio quality information (handles both formats)
         audio_quality = data.get("audioQuality", {})
         
-        # Get quality - preserve the original API value
-        quality_raw = audio_quality.get("quality", "").lower()
+        # Get the raw quality value from API
+        quality_raw = audio_quality.get("quality", "")
         
-        # Map to internal quality types for color coding
-        if quality_raw in ["hi_res_lossless", "max"]:
+        # Map to internal quality types for color coding and bitrate defaults
+        quality_lower = quality_raw.lower()
+        if quality_lower in ["hi_res_lossless", "max"]:
             quality = "hi_res_lossless"  # MAX quality
-        elif quality_raw in ["lossless", "high"]:
+        elif quality_lower in ["lossless", "high"]:
             quality = "lossless"  # HIGH quality (16-bit)
-        elif quality_raw == "low":
+        elif quality_lower == "low":
             quality = "low"  # LOW quality
         else:
             quality = "low"  # Default
@@ -319,7 +326,8 @@ def get_current_track():
             "shuffle": shuffle_display,
             "repeat": str(data.get("player", {}).get("repeat", "OFF")),
             "playing_from": playing_from,
-            "quality": quality,
+            "quality_raw": quality_raw,  # Pass the original API value
+            "quality": quality,  # Internal mapping for color coding
             "bitDepth": bit_depth,
             "sampleRate": sample_rate,
             "codec": codec,
