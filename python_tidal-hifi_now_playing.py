@@ -179,14 +179,15 @@ function updateBitrateColor(qualityType, bitrateText) {
 }
 
 function getQualityDisplay(quality) {
+    // Return the original quality names as they appear in the API
     const qualityMap = {
-        'hi_res_lossless': 'Max',
+        'hi_res_lossless': 'HI_RES_LOSSLESS',
         'max': 'Max',
-        'lossless': 'High',
+        'lossless': 'LOSSLESS',
         'high': 'High',
         'low': 'Low'
     };
-    return qualityMap[quality] || quality.toUpperCase();
+    return qualityMap[quality] || quality;
 }
 
 function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
@@ -220,7 +221,7 @@ function updateUI(data) {
     document.getElementById('progress').style.width = data.progress + '%';
     document.getElementById('metaText').innerHTML = `💿 Volume: ${data.volume}% | 🔀 Shuffle: ${data.shuffle} | 🔁 Repeat: ${data.repeat}`;
     
-    // Update quality badge (neutral color, subtle background)
+    // Update quality badge
     const qualityBadge = document.getElementById('qualityBadge');
     if (data.quality) {
         const qualityDisplay = getQualityDisplay(data.quality);
@@ -280,14 +281,14 @@ def get_current_track():
         # Extract audio quality information (handles both formats)
         audio_quality = data.get("audioQuality", {})
         
-        # Get quality (handles both 'max' and 'HI_RES_LOSSLESS' formats)
+        # Get quality - preserve the original API value
         quality_raw = audio_quality.get("quality", "").lower()
         
-        # Map to standard quality types
+        # Map to internal quality types for color coding
         if quality_raw in ["hi_res_lossless", "max"]:
-            quality = "max"  # MAX quality
+            quality = "hi_res_lossless"  # MAX quality
         elif quality_raw in ["lossless", "high"]:
-            quality = "high"  # HIGH quality (16-bit)
+            quality = "lossless"  # HIGH quality (16-bit)
         elif quality_raw == "low":
             quality = "low"  # LOW quality
         else:
