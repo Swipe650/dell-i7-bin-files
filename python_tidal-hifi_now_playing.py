@@ -31,7 +31,7 @@ HTML_TEMPLATE = """
             display:flex; 
             flex-direction:column; 
             justify-content:center; 
-            min-width: 400px;  /* Set minimum width to match previous fixed size */
+            min-width: 400px;
             flex: 1;
         }
         .track { 
@@ -43,7 +43,6 @@ HTML_TEMPLATE = """
         .album { color:#999; margin-bottom:20px; }
         .playing-from {
             font-size:0.9em;
-            #color:#1db954;
             margin-top:5px;
             margin-bottom:10px;
             display:flex;
@@ -51,13 +50,13 @@ HTML_TEMPLATE = """
             gap:8px;
         }
         .progress-container { 
-            width:100%;  /* Dynamic width - fills the container */
+            width:100%;
             height:6px; 
             background:rgba(255,255,255,0.2); 
             border-radius:10px; 
             overflow:hidden; 
             cursor:pointer;
-            min-width: 300px;  /* Ensure progress bar doesn't get too small */
+            min-width: 300px;
         }
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
         .time { display:flex; justify-content:space-between; font-size:0.8em; color:#aaa; }
@@ -74,6 +73,18 @@ HTML_TEMPLATE = """
             flex-wrap: wrap;
             gap: 8px;
         }
+        .quality-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            color: #ddd;
+            background: rgba(255,255,255,0.1);
+        }
         .bitrate {
             font-size:0.95em;
             font-family: monospace;
@@ -85,53 +96,20 @@ HTML_TEMPLATE = """
             backdrop-filter: blur(8px);
             display: inline-block;
         }
-        .quality-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.85em;
-            font-weight: 600;
-        }
-        .quality-HI_RES_LOSSLESS {
-            background: linear-gradient(135deg, #FFB347, #FF8C00);
-            color: white;
-            text-shadow: 0 0 2px rgba(0,0,0,0.3);
-        }
-        .quality-LOSSLESS {
-            background: linear-gradient(135deg, #40E0D0, #00B4D8);
-            color: white;
-        }
-        .quality-HIGH {
-            background: #666;
-            color: #eee;
-        }
-        .quality-LOW {
-            background: #444;
-            color: #999;
-        }
-        .bitrate-16bit {
-            color: #40E0D0;  /* Turquoise */
-            background-color: rgba(64, 224, 208, 0.20);
-            box-shadow: 0 0 5px rgba(64, 224, 208, 0.2);
-        }
-        .bitrate-24bit {
+        .bitrate-max {
             color: #FFB347;  /* Light orange */
             background-color: rgba(255, 179, 71, 0.20);
             box-shadow: 0 0 5px rgba(255, 179, 71, 0.2);
         }
-        .bitrate-gray {
-            color: #888888;  /* Gray for low quality or kbps */
+        .bitrate-high {
+            color: #40E0D0;  /* Turquoise */
+            background-color: rgba(64, 224, 208, 0.20);
+            box-shadow: 0 0 5px rgba(64, 224, 208, 0.2);
+        }
+        .bitrate-low {
+            color: #888888;  /* Gray */
             background-color: rgba(136, 136, 136, 0.20);
             box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
-        }
-        .codec-badge {
-            font-size: 0.75em;
-            padding: 2px 6px;
-            border-radius: 8px;
-            background: rgba(255,255,255,0.1);
-            font-family: monospace;
         }
         
         /* Responsive adjustments */
@@ -141,7 +119,7 @@ HTML_TEMPLATE = """
             .track { font-size:1.5em; text-align:center; }
             .artist, .album { text-align:center; }
             .playing-from { justify-content:center; }
-            .info { min-width: 280px; }  /* Slightly smaller minimum on mobile */
+            .info { min-width: 280px; }
             .meta { flex-direction: column; gap: 5px; text-align: center; }
             .bitrate { margin-top: 5px; }
         }
@@ -173,7 +151,6 @@ HTML_TEMPLATE = """
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="qualityBadge" class="quality-badge"></span>
-                        <span id="codecBadge" class="codec-badge"></span>
                     </div>
                     <span id="bitrate" class="bitrate"></span>
                 </div>
@@ -184,35 +161,54 @@ HTML_TEMPLATE = """
 const socket = io();
 let trackDurationSec = 0;
 
-function updateBitrateColor(bitDepth, sampleRate) {
+function updateBitrateColor(qualityType, bitrateText) {
     const bitrateElement = document.getElementById('bitrate');
     // Remove existing classes
-    bitrateElement.classList.remove('bitrate-16bit', 'bitrate-24bit', 'bitrate-gray');
+    bitrateElement.classList.remove('bitrate-max', 'bitrate-high', 'bitrate-low');
     
-    // Update based on bit depth
-    if (bitDepth >= 24) {
-        bitrateElement.classList.add('bitrate-24bit');
-    }
-    else if (bitDepth >= 16) {
-        bitrateElement.classList.add('bitrate-16bit');
-    }
-    else if (bitDepth > 0 && bitDepth < 16) {
-        bitrateElement.classList.add('bitrate-gray');
-    }
-    // Default to gray for missing data
-    else {
-        bitrateElement.classList.add('bitrate-gray');
+    // Add class based on quality type
+    if (qualityType === 'max' || qualityType === 'hi_res_lossless') {
+        bitrateElement.classList.add('bitrate-max');    // Orange
+    } else if (qualityType === 'high' || qualityType === 'lossless') {
+        bitrateElement.classList.add('bitrate-high');   // Turquoise
+    } else if (qualityType === 'low') {
+        bitrateElement.classList.add('bitrate-low');    // Gray
+    } else {
+        bitrateElement.classList.add('bitrate-low');    // Default to gray
     }
 }
 
-function getQualityBadgeText(quality) {
+function getQualityDisplay(quality) {
     const qualityMap = {
-        'HI_RES_LOSSLESS': 'MAX',
-        'LOSSLESS': 'HiFi',
-        'HIGH': 'HIGH',
-        'LOW': 'LOW'
+        'hi_res_lossless': 'Max',
+        'max': 'Max',
+        'lossless': 'High',
+        'high': 'High',
+        'low': 'Low'
     };
-    return qualityMap[quality] || quality;
+    return qualityMap[quality] || quality.toUpperCase();
+}
+
+function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
+    // Priority 1: Use badgeText if it exists and looks like a valid bitrate string
+    if (badgeText && (badgeText.includes('bit') || badgeText.includes('kHz'))) {
+        return badgeText;
+    }
+    
+    // Priority 2: Use bitDepth and sampleRate if available
+    if (bitDepth && sampleRate) {
+        return `${bitDepth}-bit ${sampleRate/1000}kHz`;
+    }
+    
+    // Priority 3: Fallback to quality mapping (using 44.1kHz for MAX as default)
+    const bitrateMap = {
+        'hi_res_lossless': '24-bit 44.1kHz',
+        'max': '24-bit 44.1kHz',
+        'lossless': '16-bit 44.1kHz',
+        'high': '16-bit 44.1kHz',
+        'low': '320 kbps'
+    };
+    return bitrateMap[quality] || 'Unknown Quality';
 }
 
 function updateUI(data) {
@@ -225,29 +221,20 @@ function updateUI(data) {
     document.getElementById('progress').style.width = data.progress + '%';
     document.getElementById('metaText').innerHTML = `💿 Volume: ${data.volume}% | 🔀 Shuffle: ${data.shuffle} | 🔁 Repeat: ${data.repeat}`;
     
-    // Update bitrate display with new structured data
-    const bitrateText = data.badgeText || `${data.bitDepth}-bit ${data.sampleRate/1000}kHz`;
-    document.getElementById('bitrate').innerText = bitrateText;
-    updateBitrateColor(data.bitDepth, data.sampleRate);
-    
-    // Update quality badge
+    // Update quality badge (neutral color, subtle background)
     const qualityBadge = document.getElementById('qualityBadge');
-    if (data.quality && data.quality !== 'UNKNOWN') {
-        qualityBadge.innerText = getQualityBadgeText(data.quality);
-        qualityBadge.className = `quality-badge quality-${data.quality}`;
+    if (data.quality) {
+        const qualityDisplay = getQualityDisplay(data.quality);
+        qualityBadge.innerText = qualityDisplay;
         qualityBadge.style.display = 'inline-flex';
     } else {
         qualityBadge.style.display = 'none';
     }
     
-    // Update codec badge
-    const codecBadge = document.getElementById('codecBadge');
-    if (data.codec) {
-        codecBadge.innerText = data.codec;
-        codecBadge.style.display = 'inline-block';
-    } else {
-        codecBadge.style.display = 'none';
-    }
+    // Update bitrate display with colored text
+    const bitrateText = getBitrateText(data.quality, data.bitDepth, data.sampleRate, data.badgeText);
+    document.getElementById('bitrate').innerText = bitrateText;
+    updateBitrateColor(data.quality, bitrateText);
     
     document.getElementById('art').src = data.art;
     document.getElementById('bg').style.backgroundImage = `url('${data.art}')`;
@@ -291,34 +278,38 @@ def get_current_track():
         playing_from_raw = data.get("playingFrom", "Unknown Source")
         playing_from = f"Playing from: {playing_from_raw}"
         
-        # Extract audio quality information
+        # Extract audio quality information (handles both formats)
         audio_quality = data.get("audioQuality", {})
         
-        # Handle both old and new API formats
-        if audio_quality:
-            # New format with structured audio quality
-            quality = audio_quality.get("quality", "UNKNOWN")
-            badge_text = audio_quality.get("badgeText", "")
-            bit_depth = audio_quality.get("bitDepth", 0)
-            sample_rate = audio_quality.get("sampleRate", 0)
-            codec = audio_quality.get("codec", "")
-            
-            # Format badge text if missing
-            if not badge_text and bit_depth and sample_rate:
-                badge_text = f"{bit_depth}-bit {sample_rate//1000}kHz"
-            elif not badge_text and quality == "HI_RES_LOSSLESS":
-                badge_text = "24-bit 96kHz"  # Default assumption
-            elif not badge_text and quality == "LOSSLESS":
-                badge_text = "16-bit 44.1kHz"
-        else:
-            # Fallback to old format or default
-            quality = "UNKNOWN"
-            badge_text = data.get("bitrate", "16-bit 44.1kHz")
-            bit_depth = 16 if "16-bit" in badge_text else (24 if "24-bit" in badge_text else 0)
-            sample_rate = 44100 if "44.1" in badge_text else (96000 if "96" in badge_text else 0)
-            codec = "FLAC" if "FLAC" in badge_text or "lossless" in str(data).lower() else "AAC"
+        # Get quality (handles both 'max' and 'HI_RES_LOSSLESS' formats)
+        quality_raw = audio_quality.get("quality", "").lower()
         
-        # Convert shuffle boolean to "On"/"Off"
+        # Map to standard quality types
+        if quality_raw in ["hi_res_lossless", "max"]:
+            quality = "hi_res_lossless"  # MAX quality
+        elif quality_raw in ["lossless", "high"]:
+            quality = "lossless"  # HIGH quality (16-bit)
+        elif quality_raw == "low":
+            quality = "low"  # LOW quality (320 kbps)
+        else:
+            quality = "low"  # Default
+        
+        # Get detailed info if available
+        bit_depth = audio_quality.get("bitDepth", 0)
+        sample_rate = audio_quality.get("sampleRate", 0)
+        codec = audio_quality.get("codec", "")
+        
+        # Get badgeText if available (this has the exact formatted string)
+        badge_text = audio_quality.get("badgeText", "")
+        
+        # If we have sample_rate but no bit_depth, try to infer bit depth from quality
+        if sample_rate and not bit_depth:
+            if quality == "hi_res_lossless":
+                bit_depth = 24
+            elif quality == "lossless":
+                bit_depth = 16
+        
+        # Convert shuffle boolean to "on"/"off"
         shuffle_raw = data.get("player", {}).get("shuffle", False)
         shuffle_display = "on" if shuffle_raw else "off"
         
@@ -335,14 +326,11 @@ def get_current_track():
             "shuffle": shuffle_display,
             "repeat": str(data.get("player", {}).get("repeat", "OFF")),
             "playing_from": playing_from,
-            # New audio quality fields
             "quality": quality,
-            "badgeText": badge_text,
             "bitDepth": bit_depth,
             "sampleRate": sample_rate,
             "codec": codec,
-            # Keep for backward compatibility
-            "bitrate": badge_text
+            "badgeText": badge_text
         }
     except Exception as e:
         print("ERROR:", e)
