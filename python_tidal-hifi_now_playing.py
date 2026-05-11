@@ -199,8 +199,10 @@ function getQualityDisplay(qualityRaw) {
     
     // Otherwise use friendly names
     const qualityMap = {
-        'max': 'Max',
-        'high': 'High',
+        //'max': 'Max',
+        //'high': 'High',
+        'max': 'HI_RES_LOSSLESS',
+        'high': 'LOSSLESS',
         'low': 'Low'
     };
     return qualityMap[qualityRaw] || qualityRaw;
