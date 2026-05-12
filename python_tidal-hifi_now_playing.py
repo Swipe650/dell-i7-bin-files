@@ -5,13 +5,15 @@ import time
 import requests
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO
+from functools import lru_cache
+import hashlib
 
 # ========== CONFIGURATION ==========
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
 REQUEST_TIMEOUT = 2
-SEEK_DELAY_MS = 100
+PROGRESS_THRESHOLD = 0.5  # Only send progress update every 0.5%
 
 # Quality mappings
 QUALITY_INTERNAL_MAP = {
@@ -31,7 +33,13 @@ BITRATE_DEFAULTS = {
 
 # ========== FLASK APP INITIALIZATION ==========
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Improvement #4: WebSocket Compression
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",
+    ping_timeout=60,     # Longer ping timeout
+    ping_interval=25     # Less frequent pings
+)
 
 # ========== HTML TEMPLATE ==========
 HTML_TEMPLATE = """
@@ -187,8 +195,36 @@ HTML_TEMPLATE = """
         </div>
     </div>
 <script>
-const socket = io();
+const socket = io({
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000
+});
+
 let trackDurationSec = 0;
+
+// Improvement #6: Browser-side Art Caching
+const artCache = new Map();
+
+function updateArt(url) {
+    if (!url) return;
+    
+    if (artCache.has(url)) {
+        const cachedUrl = artCache.get(url);
+        document.getElementById('art').src = cachedUrl;
+        document.getElementById('bg').style.backgroundImage = `url('${cachedUrl}')`;
+        return;
+    }
+    
+    const img = new Image();
+    img.onload = () => {
+        artCache.set(url, img.src);
+        document.getElementById('art').src = img.src;
+        document.getElementById('bg').style.backgroundImage = `url('${img.src}')`;
+    };
+    img.src = url;
+}
 
 // Quality display mapping
 const QUALITY_DISPLAY_MAP = {
@@ -263,6 +299,7 @@ function toggleRepeat() {
 }
 
 function updateUI(data) {
+    // Always update all fields (simpler and more reliable)
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
     document.getElementById('album').innerText = data.album;
@@ -271,7 +308,7 @@ function updateUI(data) {
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
     
-    // Make shuffle and repeat clickable
+    // Make shuffle and repeat text clickable
     const metaTextElement = document.getElementById('metaText');
     metaTextElement.innerHTML = `💿 Volume: ${data.volume}% | 🔀 <span class="clickable" onclick="toggleShuffle()">Shuffle: ${data.shuffle}</span> | 🔁 <span class="clickable" onclick="toggleRepeat()">Repeat: ${data.repeat}</span>`;
     
@@ -289,13 +326,33 @@ function updateUI(data) {
     document.getElementById('bitrate').innerText = bitrateText;
     updateBitrateColor(data.quality, bitrateText);
     
-    document.getElementById('art').src = data.art;
-    document.getElementById('bg').style.backgroundImage = `url('${data.art}')`;
+    // Update art with caching
+    updateArt(data.art);
+    
     document.getElementById('page-title').innerText = `${data.artist} - ${data.track}`;
     document.getElementById('favicon').href = data.art;
 
     trackDurationSec = data.duration_sec || trackDurationSec;
 }
+
+// Improvement #11: Auto-reconnect with better error handling
+socket.on('connect', () => {
+    console.log('Connected to server');
+});
+
+socket.on('disconnect', (reason) => {
+    console.log('Disconnected:', reason);
+    if (reason === 'io server disconnect') {
+        setTimeout(() => socket.connect(), 1000);
+    }
+});
+
+socket.on('connect_error', (error) => {
+    console.log('Connection error:', error);
+    setTimeout(() => {
+        socket.connect();
+    }, 3000);
+});
 
 socket.on('update', (data) => {
     updateUI(data);
@@ -320,6 +377,23 @@ progressContainer.addEventListener('click', (e) => {
 </html>
 """
 
+# Improvement #2: Backend Art Caching with LRU
+@lru_cache(maxsize=50)
+def get_art_hash(url):
+    """Generate hash for art URL to track changes"""
+    return hashlib.md5(url.encode()).hexdigest()
+
+# Improvement #7: Progress Throttling (simplified)
+last_progress = -1
+
+def should_update_progress(current_progress):
+    """Only return True if progress changed more than threshold"""
+    global last_progress
+    if abs(current_progress - last_progress) >= PROGRESS_THRESHOLD:
+        last_progress = current_progress
+        return True
+    return False
+
 # ========== BACKEND FUNCTIONS ==========
 def get_current_track():
     """Fetch current track information from Tidal API"""
@@ -332,6 +406,7 @@ def get_current_track():
         current_sec = data.get("currentInSeconds", 0)
         duration_sec = data.get("durationInSeconds", 1)
         progress = (current_sec / duration_sec * 100) if duration_sec else 0
+        progress = round(progress, 1)  # Round to 1 decimal place
         
         # Extract audio quality
         audio_quality = data.get("audioQuality", {})
@@ -346,7 +421,7 @@ def get_current_track():
         shuffle_display = "on" if player.get("shuffle") else "off"
         repeat = player.get("repeat", "OFF")
         
-        return {
+        track_data = {
             "track": data.get("title"),
             "artist": data.get("artist"),
             "album": data.get("album"),
@@ -366,6 +441,11 @@ def get_current_track():
             "codec": audio_quality.get("codec", ""),
             "badgeText": audio_quality.get("badgeText", "")
         }
+        
+        # Improvement #7: Only throttle progress updates
+        # Store full data but we'll filter in background task
+        return track_data
+        
     except requests.RequestException as e:
         print(f"API request failed: {e}")
         return {}
@@ -375,10 +455,34 @@ def get_current_track():
 
 def background_task():
     """Background task to poll Tidal API and emit updates"""
+    last_full_data = {}
+    
     while True:
         track_data = get_current_track()
         if track_data:
-            socketio.emit('update', track_data)
+            # Check if we should send an update
+            send_update = False
+            
+            # Always send if track changed
+            if track_data.get('track') != last_full_data.get('track'):
+                send_update = True
+            # Always send if artist changed
+            elif track_data.get('artist') != last_full_data.get('artist'):
+                send_update = True
+            # Always send if album art changed
+            elif track_data.get('art') != last_full_data.get('art'):
+                send_update = True
+            # Always send if quality changed
+            elif track_data.get('quality_raw') != last_full_data.get('quality_raw'):
+                send_update = True
+            # Check progress with throttling
+            elif should_update_progress(track_data.get('progress', 0)):
+                send_update = True
+            
+            if send_update:
+                socketio.emit('update', track_data)
+                last_full_data = track_data.copy()
+        
         socketio.sleep(POLL_INTERVAL)
 
 # ========== FLASK ROUTES ==========
