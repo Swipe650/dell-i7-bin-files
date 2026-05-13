@@ -1,47 +1,21 @@
 import eventlet
-eventlet.monkey_patch()  # Must be the very first thing
+eventlet.monkey_patch()
 
 import time
 import requests
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO
-from functools import lru_cache
-import hashlib
 
-# ========== CONFIGURATION ==========
+app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
-REQUEST_TIMEOUT = 2
-PROGRESS_THRESHOLD = 0.5  # Only send progress update every 0.5%
 
-# Quality mappings
-QUALITY_INTERNAL_MAP = {
-    'hi_res_lossless': 'hi_res_lossless',
-    'max': 'hi_res_lossless',
-    'lossless': 'lossless',
-    'high': 'lossless',
-    'low': 'low'
-}
+# Album quality cache
+album_cache = {}
 
-# Bitrate defaults (used when API doesn't provide detailed info)
-BITRATE_DEFAULTS = {
-    'hi_res_lossless': '24-bit 44.1kHz',
-    'lossless': '16-bit 44.1kHz',
-    'low': '96 kbps'
-}
-
-# ========== FLASK APP INITIALIZATION ==========
-app = Flask(__name__)
-# Improvement #4: WebSocket Compression
-socketio = SocketIO(
-    app, 
-    cors_allowed_origins="*",
-    ping_timeout=60,     # Longer ping timeout
-    ping_interval=25     # Less frequent pings
-)
-
-# ========== HTML TEMPLATE ==========
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -55,101 +29,25 @@ HTML_TEMPLATE = """
         .overlay { display:flex; height:100vh; align-items:center; justify-content:center; }
         .card { display:flex; gap:40px; background:rgba(0,0,0,0.4); padding:30px; border-radius:20px; backdrop-filter:blur(20px); max-width:90vw; }
         .art { width:260px; border-radius:16px; }
-        .info { 
-            display:flex; 
-            flex-direction:column; 
-            justify-content:center; 
-            min-width: 400px;
-            flex: 1;
-        }
-        .track { 
-            font-size:2em; 
-            word-break:break-word; 
-            overflow-wrap:break-word;
-        }
+        .info { display:flex; flex-direction:column; justify-content:center; min-width: 400px; flex: 1; }
+        .track { font-size:2em; word-break:break-word; overflow-wrap:break-word; }
         .artist { color:#ccc; }
         .album { color:#999; margin-bottom:20px; }
-        .playing-from {
-            font-size:0.9em;
-            margin-top:5px;
-            margin-bottom:10px;
-            display:flex;
-            align-items:center;
-            gap:8px;
-        }
-        .progress-container { 
-            width:100%;
-            height:6px; 
-            background:rgba(255,255,255,0.2); 
-            border-radius:10px; 
-            overflow:hidden; 
-            cursor:pointer;
-            min-width: 300px;
-        }
+        .playing-from { font-size:0.9em; margin-top:5px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+        .progress-container { width:100%; height:6px; background:rgba(255,255,255,0.2); border-radius:10px; overflow:hidden; cursor:pointer; min-width: 300px; }
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
         .time { display:flex; justify-content:space-between; font-size:0.8em; color:#aaa; }
-        .controls { margin-top:20px; display:flex; gap:20px; }
-        .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; }
+        .controls { margin-top:20px; display:flex; gap:20px; flex-wrap: wrap; }
+        .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; transition: background-color 0.2s ease; }
         .btn:hover { background:rgba(255,255,255,0.25); }
-        .meta { 
-            margin-top:10px; 
-            font-size:0.85em; 
-            color:#bbb;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .quality-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.85em;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            color: #ddd;
-            background: rgba(255,255,255,0.1);
-        }
-        .bitrate {
-            font-size:0.95em;
-            font-family: monospace;
-            letter-spacing: 0.5px;
-            font-weight: bold;
-            transition: all 0.3s ease;
-            padding: 4px 10px;
-            border-radius: 12px;
-            backdrop-filter: blur(8px);
-            display: inline-block;
-        }
-        .bitrate-max {
-            color: #FFB347;
-            background-color: rgba(255, 179, 71, 0.20);
-            box-shadow: 0 0 5px rgba(255, 179, 71, 0.2);
-        }
-        .bitrate-high {
-            color: #40E0D0;
-            background-color: rgba(64, 224, 208, 0.20);
-            box-shadow: 0 0 5px rgba(64, 224, 208, 0.2);
-        }
-        .bitrate-low {
-            color: #888888;
-            background-color: rgba(136, 136, 136, 0.20);
-            box-shadow: 0 0 5px rgba(136, 136, 136, 0.1);
-        }
-        .clickable {
-            cursor: pointer;
-            padding: 2px 6px;
-            border-radius: 8px;
-            transition: background-color 0.2s ease;
-            display: inline-block;
-        }
-        .clickable:hover {
-            background-color: rgba(255,255,255,0.2);
-        }
-        
+        .meta { margin-top:10px; font-size:0.85em; color:#bbb; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        .quality-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; letter-spacing: 0.5px; color: #ddd; background: rgba(255,255,255,0.1); }
+        .bitrate { font-size:0.95em; font-family: monospace; letter-spacing: 0.5px; font-weight: bold; transition: all 0.3s ease; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; }
+        .bitrate-max { color: #FFB347; background-color: rgba(255, 179, 71, 0.20); box-shadow: 0 0 5px rgba(255, 179, 71, 0.2); }
+        .bitrate-high { color: #40E0D0; background-color: rgba(64, 224, 208, 0.20); box-shadow: 0 0 5px rgba(64, 224, 208, 0.2); }
+        .bitrate-low { color: #888888; background-color: rgba(136, 136, 136, 0.20); box-shadow: 0 0 5px rgba(136, 136, 136, 0.1); }
+        .clickable { cursor: pointer; padding: 2px 6px; border-radius: 8px; transition: background-color 0.2s ease; display: inline-block; }
+        .clickable:hover { background-color: rgba(255,255,255,0.2); }
         @media (max-width: 768px) {
             .card { flex-direction: column; align-items: center; gap:20px; padding:20px; }
             .art { width:200px; }
@@ -159,6 +57,7 @@ HTML_TEMPLATE = """
             .info { min-width: 280px; }
             .meta { flex-direction: column; gap: 5px; text-align: center; }
             .bitrate { margin-top: 5px; }
+            .controls { justify-content: center; }
         }
     </style>
 </head>
@@ -175,14 +74,11 @@ HTML_TEMPLATE = """
                 <div class="progress-container" id="progress-container">
                     <div id="progress" class="progress"></div>
                 </div>
-                <div class="time">
-                    <span id="current"></span>
-                    <span id="duration"></span>
-                </div>
+                <div class="time"><span id="current"></span><span id="duration"></span></div>
                 <div class="controls">
-                    <button class="btn" onclick="control('previous')">⏮</button>
-                    <button class="btn" onclick="control('playpause')">⏯</button>
-                    <button class="btn" onclick="control('next')">⏭</button>
+                    <button class="btn" onclick="control('previous')">⏮ Previous</button>
+                    <button class="btn" onclick="control('playpause')">⏯ Play/Pause</button>
+                    <button class="btn" onclick="control('next')">⏭ Next</button>
                 </div>
                 <div class="meta">
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
@@ -195,111 +91,44 @@ HTML_TEMPLATE = """
         </div>
     </div>
 <script>
-const socket = io({
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000
-});
-
+const socket = io({ reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000 });
 let trackDurationSec = 0;
-
-// Improvement #6: Browser-side Art Caching
 const artCache = new Map();
 
 function updateArt(url) {
     if (!url) return;
-    
     if (artCache.has(url)) {
-        const cachedUrl = artCache.get(url);
-        document.getElementById('art').src = cachedUrl;
-        document.getElementById('bg').style.backgroundImage = `url('${cachedUrl}')`;
+        document.getElementById('art').src = artCache.get(url);
+        document.getElementById('bg').style.backgroundImage = `url('${artCache.get(url)}')`;
         return;
     }
-    
     const img = new Image();
-    img.onload = () => {
-        artCache.set(url, img.src);
-        document.getElementById('art').src = img.src;
-        document.getElementById('bg').style.backgroundImage = `url('${img.src}')`;
-    };
+    img.onload = () => { artCache.set(url, img.src); document.getElementById('art').src = img.src; document.getElementById('bg').style.backgroundImage = `url('${img.src}')`; };
     img.src = url;
 }
 
-// Quality display mapping
-const QUALITY_DISPLAY_MAP = {
-    'HI_RES_LOSSLESS': 'HI_RES_LOSSLESS',
-    'LOSSLESS': 'LOSSLESS',
-    'max': 'HI_RES_LOSSLESS',
-    'high': 'LOSSLESS',
-    'low': 'Low'
-};
-
-// Bitrate defaults
-const BITRATE_DEFAULTS = {
-    'hi_res_lossless': '24-bit 44.1kHz',
-    'lossless': '16-bit 44.1kHz',
-    'low': '96 kbps'
-};
+const QUALITY_DISPLAY_MAP = { 'HI_RES_LOSSLESS': 'HI_RES_LOSSLESS', 'LOSSLESS': 'LOSSLESS', 'max': 'HI_RES_LOSSLESS', 'high': 'LOSSLESS', 'low': 'Low' };
+const BITRATE_DEFAULTS = { 'hi_res_lossless': '24-bit 44.1kHz', 'lossless': '16-bit 44.1kHz', 'low': '96 kbps' };
 
 function updateBitrateColor(qualityType, bitrateText) {
-    const bitrateElement = document.getElementById('bitrate');
-    bitrateElement.classList.remove('bitrate-max', 'bitrate-high', 'bitrate-low');
-    
-    if (qualityType === 'max' || qualityType === 'hi_res_lossless') {
-        bitrateElement.classList.add('bitrate-max');
-    } else if (qualityType === 'high' || qualityType === 'lossless') {
-        bitrateElement.classList.add('bitrate-high');
-    } else if (qualityType === 'low') {
-        bitrateElement.classList.add('bitrate-low');
-    } else {
-        bitrateElement.classList.add('bitrate-low');
-    }
+    const el = document.getElementById('bitrate');
+    el.classList.remove('bitrate-max', 'bitrate-high', 'bitrate-low');
+    if (qualityType === 'max' || qualityType === 'hi_res_lossless') el.classList.add('bitrate-max');
+    else if (qualityType === 'high' || qualityType === 'lossless') el.classList.add('bitrate-high');
+    else el.classList.add('bitrate-low');
 }
 
-function getQualityDisplay(qualityRaw) {
-    return QUALITY_DISPLAY_MAP[qualityRaw] || qualityRaw;
-}
-
+function getQualityDisplay(q) { return QUALITY_DISPLAY_MAP[q] || q; }
 function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
-    // Priority 1: Use badgeText if it contains actual bitrate info
-    if (badgeText && /(bit|kHz|kbps)/.test(badgeText)) {
-        return badgeText;
-    }
-    
-    // Priority 2: Use bitDepth and sampleRate if available
-    if (bitDepth && sampleRate) {
-        return `${bitDepth}-bit ${sampleRate/1000}kHz`;
-    }
-    
-    // Priority 3: Use defaults based on quality
-    return BITRATE_DEFAULTS[quality] || 'Unknown Quality';
+    if (badgeText && /(bit|kHz|kbps)/.test(badgeText)) return badgeText;
+    if (bitDepth && sampleRate) return `${bitDepth}-bit ${sampleRate/1000}kHz`;
+    return BITRATE_DEFAULTS[quality] || 'Unknown';
 }
 
-function toggleShuffle() {
-    fetch('/toggle_shuffle', { method: 'POST' })
-        .then(response => {
-            if (response.ok) {
-                console.log('Shuffle toggled');
-                setTimeout(() => location.reload(), 100);
-            }
-        })
-        .catch(error => console.error('Error toggling shuffle:', error));
-}
-
-function toggleRepeat() {
-    fetch('/toggle_repeat', { method: 'POST' })
-        .then(response => {
-            if (response.ok) {
-                console.log('Repeat toggled');
-                setTimeout(() => location.reload(), 100);
-            }
-        })
-        .catch(error => console.error('Error toggling repeat:', error));
-}
+function toggleShuffle() { fetch('/toggle_shuffle', { method: 'POST' }).then(() => setTimeout(() => location.reload(), 100)); }
+function toggleRepeat() { fetch('/toggle_repeat', { method: 'POST' }).then(() => setTimeout(() => location.reload(), 100)); }
 
 function updateUI(data) {
-    // Always update all fields (simpler and more reliable)
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
     document.getElementById('album').innerText = data.album;
@@ -307,259 +136,174 @@ function updateUI(data) {
     document.getElementById('current').innerText = data.current;
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
+    document.getElementById('metaText').innerHTML = `💿 Volume: ${data.volume}% | 🔀 <span class="clickable" onclick="toggleShuffle()">Shuffle: ${data.shuffle}</span> | 🔁 <span class="clickable" onclick="toggleRepeat()">Repeat: ${data.repeat}</span>`;
     
-    // Make shuffle and repeat text clickable
-    const metaTextElement = document.getElementById('metaText');
-    metaTextElement.innerHTML = `💿 Volume: ${data.volume}% | 🔀 <span class="clickable" onclick="toggleShuffle()">Shuffle: ${data.shuffle}</span> | 🔁 <span class="clickable" onclick="toggleRepeat()">Repeat: ${data.repeat}</span>`;
+    const badge = document.getElementById('qualityBadge');
+    if (data.quality_raw) { badge.innerText = getQualityDisplay(data.quality_raw); badge.style.display = 'inline-flex'; }
+    else { badge.style.display = 'none'; }
     
-    // Update quality badge
-    const qualityBadge = document.getElementById('qualityBadge');
-    if (data.quality_raw) {
-        qualityBadge.innerText = getQualityDisplay(data.quality_raw);
-        qualityBadge.style.display = 'inline-flex';
-    } else {
-        qualityBadge.style.display = 'none';
-    }
-    
-    // Update bitrate display
     const bitrateText = getBitrateText(data.quality, data.bitDepth, data.sampleRate, data.badgeText);
     document.getElementById('bitrate').innerText = bitrateText;
     updateBitrateColor(data.quality, bitrateText);
-    
-    // Update art with caching
     updateArt(data.art);
-    
     document.getElementById('page-title').innerText = `${data.artist} - ${data.track}`;
     document.getElementById('favicon').href = data.art;
-
     trackDurationSec = data.duration_sec || trackDurationSec;
 }
 
-// Improvement #11: Auto-reconnect with better error handling
-socket.on('connect', () => {
-    console.log('Connected to server');
-});
+socket.on('update', (data) => updateUI(data));
+socket.on('connect', () => console.log('Connected'));
+socket.on('disconnect', () => setTimeout(() => socket.connect(), 1000));
 
-socket.on('disconnect', (reason) => {
-    console.log('Disconnected:', reason);
-    if (reason === 'io server disconnect') {
-        setTimeout(() => socket.connect(), 1000);
-    }
-});
-
-socket.on('connect_error', (error) => {
-    console.log('Connection error:', error);
-    setTimeout(() => {
-        socket.connect();
-    }, 3000);
-});
-
-socket.on('update', (data) => {
-    updateUI(data);
-});
-
-function control(action) {
-    fetch(`/control/${action}`, { method: 'POST' });
-}
-
-const progressContainer = document.getElementById('progress-container');
-progressContainer.addEventListener('click', (e) => {
-    const rect = progressContainer.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const width = rect.width;
-    const percent = clickX / width;
-    const seekSeconds = Math.floor(percent * trackDurationSec);
-
-    fetch(`/seek/${seekSeconds}`, { method: 'PUT' });
+function control(action) { fetch(`/control/${action}`, { method: 'POST' }); }
+document.getElementById('progress-container').addEventListener('click', (e) => {
+    const rect = e.target.closest('.progress-container').getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    fetch(`/seek/${Math.floor(percent * trackDurationSec)}`, { method: 'PUT' });
 });
 </script>
 </body>
 </html>
 """
 
-# Improvement #2: Backend Art Caching with LRU
-@lru_cache(maxsize=50)
-def get_art_hash(url):
-    """Generate hash for art URL to track changes"""
-    return hashlib.md5(url.encode()).hexdigest()
-
-# Improvement #7: Progress Throttling (simplified)
-last_progress = -1
-
-def should_update_progress(current_progress):
-    """Only return True if progress changed more than threshold"""
-    global last_progress
-    if abs(current_progress - last_progress) >= PROGRESS_THRESHOLD:
-        last_progress = current_progress
-        return True
-    return False
-
-# ========== BACKEND FUNCTIONS ==========
 def get_current_track():
-    """Fetch current track information from Tidal API"""
     try:
-        response = requests.get(CURRENT_URL, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        data = response.json()
+        resp = requests.get(CURRENT_URL, timeout=2)
+        resp.raise_for_status()
+        data = resp.json()
         
-        # Calculate progress
         current_sec = data.get("currentInSeconds", 0)
         duration_sec = data.get("durationInSeconds", 1)
         progress = (current_sec / duration_sec * 100) if duration_sec else 0
-        progress = round(progress, 1)  # Round to 1 decimal place
         
-        # Extract audio quality
         audio_quality = data.get("audioQuality", {})
         quality_raw = audio_quality.get("quality", "")
+        badge_text = audio_quality.get("badgeText", "")
+        
+        # Cache logic
+        album_name = data.get("album", "")
+        artist_name = data.get("artist", "")
+        cache_key = f"{artist_name}|{album_name}".lower()
+        
+        cached_quality = album_cache.get(cache_key)
+        if cached_quality and quality_raw.lower() in ['max', 'high']:
+            audio_quality = cached_quality
+            quality_raw = audio_quality.get("quality", "")
+            badge_text = audio_quality.get("badgeText", "")
+        
+        # Cache detailed quality when found
+        has_detailed = badge_text and ('kHz' in badge_text or 'kbps' in badge_text)
+        if has_detailed and album_name:
+            album_cache[cache_key] = audio_quality
+        
+        # Map quality for color coding
         quality_lower = quality_raw.lower()
+        if quality_lower in ['hi_res_lossless', 'max']:
+            quality = 'hi_res_lossless'
+        elif quality_lower in ['lossless', 'high']:
+            quality = 'lossless'
+        else:
+            quality = 'low'
         
-        # Map to internal quality type for color coding
-        quality = QUALITY_INTERNAL_MAP.get(quality_lower, 'low')
-        
-        # Get player state
         player = data.get("player", {})
-        shuffle_display = "on" if player.get("shuffle") else "off"
-        repeat = player.get("repeat", "OFF")
         
-        track_data = {
+        return {
             "track": data.get("title"),
-            "artist": data.get("artist"),
-            "album": data.get("album"),
+            "artist": artist_name,
+            "album": album_name,
             "art": data.get("image"),
             "current": data.get("current"),
             "duration": data.get("duration"),
             "duration_sec": duration_sec,
-            "progress": progress,
+            "progress": round(progress, 1),
             "volume": round(data.get("volume", 0) * 100),
-            "shuffle": shuffle_display,
-            "repeat": repeat,
-            "playing_from": f"Playing from: {data.get('playingFrom', 'Unknown Source')}",
+            "shuffle": "on" if player.get("shuffle") else "off",
+            "repeat": player.get("repeat", "OFF"),
+            "playing_from": f"Playing from: {data.get('playingFrom', 'Unknown')}",
             "quality_raw": quality_raw,
             "quality": quality,
             "bitDepth": audio_quality.get("bitDepth", 0),
             "sampleRate": audio_quality.get("sampleRate", 0),
             "codec": audio_quality.get("codec", ""),
-            "badgeText": audio_quality.get("badgeText", "")
+            "badgeText": badge_text
         }
-        
-        # Improvement #7: Only throttle progress updates
-        # Store full data but we'll filter in background task
-        return track_data
-        
-    except requests.RequestException as e:
-        print(f"API request failed: {e}")
-        return {}
     except Exception as e:
-        print(f"Unexpected error in get_current_track: {e}")
+        print(f"ERROR: {e}")
         return {}
 
 def background_task():
-    """Background task to poll Tidal API and emit updates"""
-    last_full_data = {}
-    
+    last_data = {}
     while True:
         track_data = get_current_track()
         if track_data:
-            # Check if we should send an update
-            send_update = False
-            
-            # Always send if track changed
-            if track_data.get('track') != last_full_data.get('track'):
-                send_update = True
-            # Always send if artist changed
-            elif track_data.get('artist') != last_full_data.get('artist'):
-                send_update = True
-            # Always send if album art changed
-            elif track_data.get('art') != last_full_data.get('art'):
-                send_update = True
-            # Always send if quality changed
-            elif track_data.get('quality_raw') != last_full_data.get('quality_raw'):
-                send_update = True
-            # Check progress with throttling
-            elif should_update_progress(track_data.get('progress', 0)):
-                send_update = True
-            
-            if send_update:
+            if (track_data.get('track') != last_data.get('track') or
+                track_data.get('badgeText') != last_data.get('badgeText') or
+                abs(track_data.get('progress', 0) - last_data.get('progress', 0)) >= 0.5):
                 socketio.emit('update', track_data)
-                last_full_data = track_data.copy()
-        
-        socketio.sleep(POLL_INTERVAL)
+                last_data = track_data.copy()
+        socketio.sleep(1)
 
-# ========== FLASK ROUTES ==========
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/control/<action>', methods=['POST'])
 def control(action):
-    """Handle playback controls"""
-    endpoints = {
-        'playpause': f"{BASE_URL}/player/playpause",
-        'next': f"{BASE_URL}/player/next",
-        'previous': f"{BASE_URL}/player/previous"
-    }
-    
-    url = endpoints.get(action)
-    if not url:
-        return ('', 404)
-    
-    try:
-        # Try POST first, fallback to GET
+    endpoints = {'playpause': 'playpause', 'next': 'next', 'previous': 'previous'}
+    if action in endpoints:
         try:
-            requests.post(url, timeout=REQUEST_TIMEOUT)
-        except Exception:
-            requests.get(url, timeout=REQUEST_TIMEOUT)
-    except Exception as e:
-        print(f"CONTROL ERROR ({action}): {e}")
-    
+            requests.post(f"{BASE_URL}/player/{endpoints[action]}", timeout=2)
+        except:
+            pass
     return ('', 204)
 
 @app.route('/toggle_shuffle', methods=['POST'])
 def toggle_shuffle():
-    """Toggle shuffle mode"""
     try:
-        url = f"{BASE_URL}/player/shuffle/toggle"
-        requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=REQUEST_TIMEOUT)
-        print("Shuffle toggled successfully")
-        return ('', 204)
-    except Exception as e:
-        print(f"SHUFFLE ERROR: {e}")
-        return ('', 500)
+        requests.post(f"{BASE_URL}/player/shuffle/toggle", headers={'accept': 'text/plain'}, data='', timeout=2)
+    except:
+        pass
+    return ('', 204)
 
 @app.route('/toggle_repeat', methods=['POST'])
 def toggle_repeat():
-    """Toggle repeat mode"""
     try:
-        url = f"{BASE_URL}/player/repeat/toggle"
-        requests.post(url, headers={'accept': 'text/plain'}, data='', timeout=REQUEST_TIMEOUT)
-        print("Repeat toggled successfully")
-        return ('', 204)
-    except Exception as e:
-        print(f"REPEAT ERROR: {e}")
-        return ('', 500)
+        requests.post(f"{BASE_URL}/player/repeat/toggle", headers={'accept': 'text/plain'}, data='', timeout=2)
+    except:
+        pass
+    return ('', 204)
 
 @app.route('/seek/<int:seconds>', methods=['PUT'])
 def seek(seconds):
-    """Seek to specific position in current track"""
-    if seconds < 0:
-        return ('Bad Request', 400)
-    
     try:
-        url = f"{BASE_URL}/player/seek/absolute?seconds={seconds}"
-        try:
-            requests.put(url, timeout=REQUEST_TIMEOUT)
-        except Exception:
-            requests.get(url, timeout=REQUEST_TIMEOUT)
-    except Exception as e:
-        print(f"SEEK ERROR: {e}")
-    
+        requests.put(f"{BASE_URL}/player/seek/absolute?seconds={seconds}", timeout=2)
+    except:
+        pass
     return ('', 204)
 
-@socketio.on('connect')
-def connect():
-    print("Client connected")
+#@app.route('/cache/clear', methods=['POST'])
+@app.route('/cache/clear', methods=['GET', 'POST'])
+def clear_cache():
+    album_cache.clear()
+    print("Cache cleared by user")
+    return ('', 204)
 
-# ========== MAIN ENTRY POINT ==========
+@app.route('/cache/view')
+def view_cache():
+    if not album_cache:
+        return "<h3>Cache is empty</h3><p>Play some tracks to populate the cache.</p><p><a href='/'>Back to player</a></p>"
+    html = "<h3>Cached Albums</h3><ul>"
+    for key, val in album_cache.items():
+        html += f"<li><strong>{key}</strong><br>&nbsp;&nbsp;{val.get('badgeText', 'N/A')} - {val.get('quality', 'N/A')}</li>"
+    html += f"</ul><p><strong>Total cached: {len(album_cache)} albums</strong></p><p><a href='/'>Back to player</a></p>"
+    return html
+
 if __name__ == '__main__':
+    print("=" * 50)
+    print("TIDAL HIFI PLAYER")
+    print("=" * 50)
+    print(f"Cache will store detailed quality info per album")
+    print(f"View cache at: http://127.0.0.1:5000/cache/view")
+    print("=" * 50)
     socketio.start_background_task(background_task)
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
