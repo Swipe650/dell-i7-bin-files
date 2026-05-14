@@ -45,7 +45,7 @@ HTML_TEMPLATE = """
         .bitrate { font-size:0.95em; font-family: monospace; letter-spacing: 0.5px; font-weight: bold; transition: all 0.3s ease; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; }
         .bitrate-max { color: #FFB347; background-color: rgba(255, 179, 71, 0.20); box-shadow: 0 0 5px rgba(255, 179, 71, 0.2); }
         .bitrate-high { color: #40E0D0; background-color: rgba(64, 224, 208, 0.20); box-shadow: 0 0 5px rgba(64, 224, 208, 0.2); }
-        .bitrate-low { color: #888888; background-color: rgba(136, 136, 136, 0.20); box-shadow: 0 0 5px rgba(136, 136, 136, 0.1); }
+        .bitrate-low { color: #888888; background-color: rgba(136, 136, 136, 0.20); box-shadow: 0 0 5px rgba(136, 136, 136, 0.2); }
         .clickable { cursor: pointer; padding: 2px 6px; border-radius: 8px; transition: background-color 0.2s ease; display: inline-block; }
         .clickable:hover { background-color: rgba(255,255,255,0.2); }
         @media (max-width: 768px) {
