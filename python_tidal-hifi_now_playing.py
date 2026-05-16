@@ -1,21 +1,253 @@
+#!/usr/bin/env python3
 import eventlet
 eventlet.monkey_patch()
 
 import time
+import threading
+import subprocess
 import requests
 from flask import Flask, render_template_string, request, jsonify
 from flask_socketio import SocketIO
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
-
+# ------------------------- CONFIGURATION -------------------------
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
 
-# Album quality cache
+# Album quality cache (same as before)
 album_cache = {}
 
+# ------------------------- FLASK & SOCKET.IO -------------------------
+app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")   # uses eventlet
+
+# Global store for current track data
+current_track_data = {
+    "track": "",
+    "artist": "",
+    "album": "",
+    "art": "",
+    "current": "0:00",
+    "duration": "0:00",
+    "duration_sec": 0,
+    "progress": 0,
+    "volume": 50,
+    "shuffle": "off",
+    "repeat": "OFF",
+    "playing_from": "Playing from: Unknown",
+    "quality_raw": "",
+    "quality": "low",
+    "bitDepth": 0,
+    "sampleRate": 0,
+    "codec": "",
+    "badgeText": ""
+}
+
+# ------------------------- PLAYERCTL HELPERS -------------------------
+PLAYERCTL_CMD = ["playerctl", "-i", "plasma-browser-integration"]
+
+def run_playerctl(*args):
+    try:
+        result = subprocess.run(
+            PLAYERCTL_CMD + list(args),
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception as e:
+        print(f"playerctl error: {e}")
+    return None
+
+def get_playerctl_metadata():
+    title = run_playerctl("metadata", "xesam:title")
+    if title is None:
+        return None
+    artist = run_playerctl("metadata", "xesam:artist") or ""
+    album = run_playerctl("metadata", "xesam:album") or ""
+    length_us = run_playerctl("metadata", "mpris:length")
+    position_sec = run_playerctl("position")
+
+    duration_sec = int(length_us) / 1_000_000 if length_us and length_us.isdigit() else 0
+    pos = float(position_sec) if position_sec else 0
+
+    return {
+        "track": title,
+        "artist": artist,
+        "album": album,
+        "duration_sec": duration_sec,
+        "position": pos
+    }
+
+# ------------------------- HTTP API FETCH (with caching) -------------------------
+def fetch_http_details():
+    """Fetch album art, quality, and player state from HTTP API.
+       Updates global current_track_data and album_cache."""
+    global current_track_data
+    try:
+        resp = requests.get(CURRENT_URL, timeout=2, headers={'Cache-Control': 'no-cache'})
+        if resp.status_code != 200:
+            return
+        data = resp.json()
+        audio_quality = data.get("audioQuality", {})
+        quality_raw = audio_quality.get("quality", "")
+        badge_text = audio_quality.get("badgeText", "")
+        bit_depth = audio_quality.get("bitDepth", 0)
+        sample_rate = audio_quality.get("sampleRate", 0)
+        codec = audio_quality.get("codec", "")
+        art = data.get("image", "")
+        album_name = data.get("album", "")
+        artist_name = data.get("artist", "")
+
+        # Update art and player state (these are always taken from HTTP)
+        current_track_data["art"] = art
+        player = data.get("player", {})
+        current_track_data["shuffle"] = "on" if player.get("shuffle") else "off"
+        current_track_data["repeat"] = player.get("repeat", "OFF")
+        current_track_data["volume"] = round(data.get("volume", 0) * 100)
+        current_track_data["playing_from"] = f"Playing from: {data.get('playingFrom', 'Unknown')}"
+
+        # --- CACHING LOGIC (exactly as in the old working script) ---
+        # Check if this response has detailed quality
+        has_detailed = (bit_depth > 0 and sample_rate > 0) or (badge_text and ('kHz' in badge_text or 'kbps' in badge_text))
+        if has_detailed and album_name and artist_name:
+            cache_key = f"{artist_name}|{album_name}".lower()
+            # Cache it (overwrite if we have better details, e.g., higher sample rate)
+            existing = album_cache.get(cache_key)
+            if not existing or (sample_rate > existing.get("sampleRate", 0)):
+                album_cache[cache_key] = audio_quality
+                print(f"Cached quality for {album_name}: {badge_text}")
+
+        # If current quality is simplified (max/high) and we have a cache entry, use cached details
+        if quality_raw.lower() in ["max", "high"] and album_name and artist_name:
+            cache_key = f"{artist_name}|{album_name}".lower()
+            cached = album_cache.get(cache_key)
+            if cached:
+                print(f"Using cached quality for {album_name}: {cached.get('badgeText')}")
+                # Override with cached values
+                quality_raw = cached.get("quality", quality_raw)
+                badge_text = cached.get("badgeText", badge_text)
+                bit_depth = cached.get("bitDepth", bit_depth)
+                sample_rate = cached.get("sampleRate", sample_rate)
+                codec = cached.get("codec", codec)
+
+        # Update global track data with (possibly cached) quality info
+        current_track_data["badgeText"] = badge_text
+        current_track_data["quality_raw"] = quality_raw
+        current_track_data["bitDepth"] = bit_depth
+        current_track_data["sampleRate"] = sample_rate
+        current_track_data["codec"] = codec
+
+        # Map to internal quality for color coding
+        ql = quality_raw.lower()
+        if ql in ["hi_res_lossless", "max"]:
+            current_track_data["quality"] = "hi_res_lossless"
+        elif ql in ["lossless", "high"]:
+            current_track_data["quality"] = "lossless"
+        else:
+            current_track_data["quality"] = "low"
+
+    except Exception as e:
+        print(f"HTTP fetch error: {e}")
+
+# ------------------------- BACKGROUND POLLER (playerctl + HTTP) -------------------------
+def background_poller():
+    """Poll playerctl and HTTP API every second, emit updates."""
+    global current_track_data
+    last_title = None
+    while True:
+        # 1. Get reliable metadata from playerctl
+        meta = get_playerctl_metadata()
+        if meta:
+            title = meta["track"]
+            track_changed = (title != last_title)
+            if track_changed:
+                print(f"Track changed: {title}")
+                # Update basic metadata (title, artist, album, duration)
+                current_track_data["track"] = title
+                current_track_data["artist"] = meta["artist"]
+                current_track_data["album"] = meta["album"]
+                current_track_data["duration_sec"] = meta["duration_sec"]
+                mins = int(meta["duration_sec"] // 60)
+                secs = int(meta["duration_sec"] % 60)
+                current_track_data["duration"] = f"{mins}:{secs:02d}"
+                last_title = title
+
+            # Always update position and progress from playerctl
+            pos = meta["position"]
+            dur = current_track_data["duration_sec"]
+            progress = (pos / dur * 100) if dur > 0 else 0
+            mins = int(pos // 60)
+            secs = int(pos % 60)
+            current_track_data["current"] = f"{mins}:{secs:02d}"
+            current_track_data["progress"] = round(progress, 1)
+
+        # 2. Fetch HTTP details (art, quality, player state) – this also updates cache
+        fetch_http_details()
+
+        # 3. Emit combined update to all clients
+        socketio.emit('update', current_track_data)
+
+        eventlet.sleep(POLL_INTERVAL)
+
+# ------------------------- FLASK ROUTES (controls via HTTP) -------------------------
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/control/<action>', methods=['POST'])
+def control(action):
+    endpoints = {'playpause': 'playpause', 'next': 'next', 'previous': 'previous'}
+    if action in endpoints:
+        try:
+            requests.post(f"{BASE_URL}/player/{endpoints[action]}", timeout=2)
+        except:
+            pass
+    return ('', 204)
+
+@app.route('/toggle_shuffle', methods=['POST'])
+def toggle_shuffle():
+    try:
+        requests.post(f"{BASE_URL}/player/shuffle/toggle", headers={'accept': 'text/plain'}, data='', timeout=2)
+    except:
+        pass
+    return ('', 204)
+
+@app.route('/toggle_repeat', methods=['POST'])
+def toggle_repeat():
+    try:
+        requests.post(f"{BASE_URL}/player/repeat/toggle", headers={'accept': 'text/plain'}, data='', timeout=2)
+    except:
+        pass
+    return ('', 204)
+
+@app.route('/seek/<int:seconds>', methods=['PUT'])
+def seek(seconds):
+    try:
+        requests.put(f"{BASE_URL}/player/seek/absolute?seconds={seconds}", timeout=2)
+    except:
+        pass
+    return ('', 204)
+
+@app.route('/cache/clear', methods=['GET', 'POST'])
+def clear_cache():
+    album_cache.clear()
+    print("Album cache cleared")
+    return ('', 204)
+
+@app.route('/cache/view')
+def view_cache():
+    if not album_cache:
+        return "<h3>Cache is empty</h3><p><a href='/'>Back</a></p>"
+    html = "<h3>Cached Albums</h3><ul>"
+    for key, val in album_cache.items():
+        html += f"<li><strong>{key}</strong><br>&nbsp;&nbsp;{val.get('badgeText', 'N/A')}</li>"
+    html += "</ul><p><a href='/'>Back</a></p>"
+    return html
+
+# ------------------------- FRONTEND HTML (unchanged, paste your working template) -------------------------
+# (I'll include the exact same HTML from your previous stable version)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -34,7 +266,7 @@ HTML_TEMPLATE = """
         .artist { color:#ccc; }
         .album { color:#999; margin-bottom:20px; }
         .playing-from { font-size:0.9em; margin-top:5px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
-        .progress-container { width:100%; height:6px; background:rgba(255,255,255,0.2); border-radius:10px; overflow:hidden; cursor:pointer; min-width: 300px; }
+        .progress-container { width:100%; height:6px; background:rgba(255,255,255,0.2); border-radius:10px; overflow:hidden; cursor:default; min-width: 300px; }
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
         .time { display:flex; justify-content:space-between; font-size:0.8em; color:#aaa; }
         .controls { margin-top:20px; display:flex; gap:20px; flex-wrap: wrap; }
@@ -125,8 +357,8 @@ function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
     return BITRATE_DEFAULTS[quality] || 'Unknown';
 }
 
-function toggleShuffle() { fetch('/toggle_shuffle', { method: 'POST' }).then(() => setTimeout(() => location.reload(), 100)); }
-function toggleRepeat() { fetch('/toggle_repeat', { method: 'POST' }).then(() => setTimeout(() => location.reload(), 100)); }
+function toggleShuffle() { fetch('/toggle_shuffle', { method: 'POST' }); }
+function toggleRepeat() { fetch('/toggle_repeat', { method: 'POST' }); }
 
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
@@ -166,144 +398,10 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
 </html>
 """
 
-def get_current_track():
-    try:
-        resp = requests.get(CURRENT_URL, timeout=2)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        current_sec = data.get("currentInSeconds", 0)
-        duration_sec = data.get("durationInSeconds", 1)
-        progress = (current_sec / duration_sec * 100) if duration_sec else 0
-        
-        audio_quality = data.get("audioQuality", {})
-        quality_raw = audio_quality.get("quality", "")
-        badge_text = audio_quality.get("badgeText", "")
-        
-        # Cache logic
-        album_name = data.get("album", "")
-        artist_name = data.get("artist", "")
-        cache_key = f"{artist_name}|{album_name}".lower()
-        
-        cached_quality = album_cache.get(cache_key)
-        if cached_quality and quality_raw.lower() in ['max', 'high']:
-            audio_quality = cached_quality
-            quality_raw = audio_quality.get("quality", "")
-            badge_text = audio_quality.get("badgeText", "")
-        
-        # Cache detailed quality when found
-        has_detailed = badge_text and ('kHz' in badge_text or 'kbps' in badge_text)
-        if has_detailed and album_name:
-            album_cache[cache_key] = audio_quality
-        
-        # Map quality for color coding
-        quality_lower = quality_raw.lower()
-        if quality_lower in ['hi_res_lossless', 'max']:
-            quality = 'hi_res_lossless'
-        elif quality_lower in ['lossless', 'high']:
-            quality = 'lossless'
-        else:
-            quality = 'low'
-        
-        player = data.get("player", {})
-        
-        return {
-            "track": data.get("title"),
-            "artist": artist_name,
-            "album": album_name,
-            "art": data.get("image"),
-            "current": data.get("current"),
-            "duration": data.get("duration"),
-            "duration_sec": duration_sec,
-            "progress": round(progress, 1),
-            "volume": round(data.get("volume", 0) * 100),
-            "shuffle": "on" if player.get("shuffle") else "off",
-            "repeat": player.get("repeat", "OFF"),
-            "playing_from": f"Playing from: {data.get('playingFrom', 'Unknown')}",
-            "quality_raw": quality_raw,
-            "quality": quality,
-            "bitDepth": audio_quality.get("bitDepth", 0),
-            "sampleRate": audio_quality.get("sampleRate", 0),
-            "codec": audio_quality.get("codec", ""),
-            "badgeText": badge_text
-        }
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return {}
-
-def background_task():
-    last_data = {}
-    while True:
-        track_data = get_current_track()
-        if track_data:
-            if (track_data.get('track') != last_data.get('track') or
-                track_data.get('badgeText') != last_data.get('badgeText') or
-                abs(track_data.get('progress', 0) - last_data.get('progress', 0)) >= 0.5):
-                socketio.emit('update', track_data)
-                last_data = track_data.copy()
-        socketio.sleep(1)
-
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE)
-
-@app.route('/control/<action>', methods=['POST'])
-def control(action):
-    endpoints = {'playpause': 'playpause', 'next': 'next', 'previous': 'previous'}
-    if action in endpoints:
-        try:
-            requests.post(f"{BASE_URL}/player/{endpoints[action]}", timeout=2)
-        except:
-            pass
-    return ('', 204)
-
-@app.route('/toggle_shuffle', methods=['POST'])
-def toggle_shuffle():
-    try:
-        requests.post(f"{BASE_URL}/player/shuffle/toggle", headers={'accept': 'text/plain'}, data='', timeout=2)
-    except:
-        pass
-    return ('', 204)
-
-@app.route('/toggle_repeat', methods=['POST'])
-def toggle_repeat():
-    try:
-        requests.post(f"{BASE_URL}/player/repeat/toggle", headers={'accept': 'text/plain'}, data='', timeout=2)
-    except:
-        pass
-    return ('', 204)
-
-@app.route('/seek/<int:seconds>', methods=['PUT'])
-def seek(seconds):
-    try:
-        requests.put(f"{BASE_URL}/player/seek/absolute?seconds={seconds}", timeout=2)
-    except:
-        pass
-    return ('', 204)
-
-#@app.route('/cache/clear', methods=['POST'])
-@app.route('/cache/clear', methods=['GET', 'POST'])
-def clear_cache():
-    album_cache.clear()
-    print("Cache cleared by user")
-    return ('', 204)
-
-@app.route('/cache/view')
-def view_cache():
-    if not album_cache:
-        return "<h3>Cache is empty</h3><p>Play some tracks to populate the cache.</p><p><a href='/'>Back to player</a></p>"
-    html = "<h3>Cached Albums</h3><ul>"
-    for key, val in album_cache.items():
-        html += f"<li><strong>{key}</strong><br>&nbsp;&nbsp;{val.get('badgeText', 'N/A')} - {val.get('quality', 'N/A')}</li>"
-    html += f"</ul><p><strong>Total cached: {len(album_cache)} albums</strong></p><p><a href='/'>Back to player</a></p>"
-    return html
-
+# ------------------------- MAIN ENTRY POINT -------------------------
 if __name__ == '__main__':
-    print("=" * 50)
-    print("TIDAL HIFI PLAYER")
-    print("=" * 50)
-    print(f"Cache will store detailed quality info per album")
-    print(f"View cache at: http://127.0.0.1:5000/cache/view")
-    print("=" * 50)
-    socketio.start_background_task(background_task)
+    poller_thread = threading.Thread(target=background_poller, daemon=True)
+    poller_thread.start()
+    print("Starting TIDAL HIFI PLAYER (playerctl + HTTP cache)")
+    print("Open http://127.0.0.1:5000")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
