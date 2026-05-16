@@ -14,8 +14,9 @@ BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
 
-# Album quality cache (same as before)
+# Album quality cache
 album_cache = {}
+last_cached_album = None  # for suppressing repeated cache messages
 
 # ------------------------- FLASK & SOCKET.IO -------------------------
 app = Flask(__name__)
@@ -84,7 +85,7 @@ def get_playerctl_metadata():
 def fetch_http_details():
     """Fetch album art, quality, and player state from HTTP API.
        Updates global current_track_data and album_cache."""
-    global current_track_data
+    global current_track_data, last_cached_album
     try:
         resp = requests.get(CURRENT_URL, timeout=2, headers={'Cache-Control': 'no-cache'})
         if resp.status_code != 200:
@@ -100,7 +101,7 @@ def fetch_http_details():
         album_name = data.get("album", "")
         artist_name = data.get("artist", "")
 
-        # Update art and player state (these are always taken from HTTP)
+        # Update art and player state (always from HTTP)
         current_track_data["art"] = art
         player = data.get("player", {})
         current_track_data["shuffle"] = "on" if player.get("shuffle") else "off"
@@ -108,12 +109,11 @@ def fetch_http_details():
         current_track_data["volume"] = round(data.get("volume", 0) * 100)
         current_track_data["playing_from"] = f"Playing from: {data.get('playingFrom', 'Unknown')}"
 
-        # --- CACHING LOGIC (exactly as in the old working script) ---
+        # --- CACHING LOGIC ---
         # Check if this response has detailed quality
         has_detailed = (bit_depth > 0 and sample_rate > 0) or (badge_text and ('kHz' in badge_text or 'kbps' in badge_text))
         if has_detailed and album_name and artist_name:
             cache_key = f"{artist_name}|{album_name}".lower()
-            # Cache it (overwrite if we have better details, e.g., higher sample rate)
             existing = album_cache.get(cache_key)
             if not existing or (sample_rate > existing.get("sampleRate", 0)):
                 album_cache[cache_key] = audio_quality
@@ -124,7 +124,10 @@ def fetch_http_details():
             cache_key = f"{artist_name}|{album_name}".lower()
             cached = album_cache.get(cache_key)
             if cached:
-                print(f"Using cached quality for {album_name}: {cached.get('badgeText')}")
+                # Only print once per album
+                if last_cached_album != cache_key:
+                    print(f"Using cached quality for {album_name}: {cached.get('badgeText')}")
+                    last_cached_album = cache_key
                 # Override with cached values
                 quality_raw = cached.get("quality", quality_raw)
                 badge_text = cached.get("badgeText", badge_text)
@@ -183,7 +186,7 @@ def background_poller():
             current_track_data["current"] = f"{mins}:{secs:02d}"
             current_track_data["progress"] = round(progress, 1)
 
-        # 2. Fetch HTTP details (art, quality, player state) – this also updates cache
+        # 2. Fetch HTTP details (art, quality, player state) – also updates cache
         fetch_http_details()
 
         # 3. Emit combined update to all clients
@@ -232,7 +235,9 @@ def seek(seconds):
 
 @app.route('/cache/clear', methods=['GET', 'POST'])
 def clear_cache():
+    global album_cache, last_cached_album
     album_cache.clear()
+    last_cached_album = None
     print("Album cache cleared")
     return ('', 204)
 
@@ -246,8 +251,8 @@ def view_cache():
     html += "</ul><p><a href='/'>Back</a></p>"
     return html
 
-# ------------------------- FRONTEND HTML (unchanged, paste your working template) -------------------------
-# (I'll include the exact same HTML from your previous stable version)
+# ------------------------- FRONTEND HTML -------------------------
+# (progress bar cursor changed to default)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
