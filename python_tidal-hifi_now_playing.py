@@ -128,13 +128,9 @@ def get_top_tracks(limit=25):
 def get_listening_time():
     """Return total listening hours for today, this week, this month, this year."""
     now = datetime.now()
-    # Start of day (local midnight)
     today_start = int(datetime(now.year, now.month, now.day).timestamp())
-    # Start of week (Monday)
     week_start = int((now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
-    # Start of month
     month_start = int(datetime(now.year, now.month, 1).timestamp())
-    # Start of year
     year_start = int(datetime(now.year, 1, 1).timestamp())
     
     conn = sqlite3.connect(DATABASE)
@@ -382,6 +378,36 @@ def api_stats():
 def api_listening_time():
     return jsonify(get_listening_time())
 
+@app.route('/api/listening_clock')
+def api_listening_clock():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    # Get scrobble count per hour of day (0-23)
+    c.execute("""
+        SELECT 
+            strftime('%H', datetime(timestamp, 'unixepoch')) as hour,
+            COUNT(*) as count
+        FROM scrobbles
+        GROUP BY hour
+        ORDER BY hour
+    """)
+    rows = c.fetchall()
+    conn.close()
+    
+    hour_counts = [0] * 24
+    for row in rows:
+        hour = int(row[0])
+        hour_counts[hour] = row[1]
+    
+    max_count = max(hour_counts) if hour_counts else 0
+    busiest_hour = hour_counts.index(max_count) if max_count > 0 else 0
+    
+    return jsonify({
+        "hour_counts": hour_counts,
+        "busiest_hour": busiest_hour,
+        "busiest_hour_count": max_count
+    })
+
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
     with session["lock"]:
@@ -615,7 +641,7 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
 </html>
 """
 
-# ------------------------- SCROBBLES OVERVIEW PAGE (with listening time) -------------------------
+# ------------------------- SCROBBLES OVERVIEW PAGE (with listening clock pie chart) -------------------------
 SCROBBLES_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -624,8 +650,8 @@ SCROBBLES_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='grad' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23e0e0e0'/%3E%3Cstop offset='70%25' stop-color='%23a0a0a0'/%3E%3Cstop offset='100%25' stop-color='%23404040'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23grad)' stroke='%23333' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23333'/%3E%3C/svg%3E">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
-        /* CSS variables for theming */
         :root {
             --bg-body: #f9f9f9;
             --bg-card: #ffffff;
@@ -992,6 +1018,12 @@ SCROBBLES_TEMPLATE = """
             .now-playing { flex-direction: column; text-align: center; }
             .time-stats { flex-direction: column; align-items: center; }
         }
+        canvas {
+            max-height: 250px;
+            width: auto;
+            margin: 0 auto;
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -1034,6 +1066,13 @@ SCROBBLES_TEMPLATE = """
             <div class="time-item"><div class="time-label">This Year</div><div class="time-value" id="timeYear">-</div></div>
         </div>
         <div class="total-scrobbles" id="totalScrobbles"></div>
+    </div>
+
+    <!-- Listening Clock Pie Chart -->
+    <div class="stat-card">
+        <h3>🕒 Listening Clock (Busiest Hours)</h3>
+        <canvas id="clockPieChart" width="300" height="300"></canvas>
+        <div id="busiestHourInfo" style="text-align: center; margin-top: 10px; font-weight: bold;"></div>
     </div>
 
     <!-- Tools: only export, import, refresh -->
@@ -1132,6 +1171,56 @@ SCROBBLES_TEMPLATE = """
                 }
             })
             .catch(e => console.error('Stats error:', e));
+    }
+
+    // Listening Clock Pie Chart
+    function fetchListeningClock() {
+        fetch('/api/listening_clock')
+            .then(r => r.json())
+            .then(data => {
+                const hour_counts = data.hour_counts;
+                const busiest_hour = data.busiest_hour;
+                const busiest_count = data.busiest_hour_count;
+                
+                // Prepare data for Chart.js (only hours with scrobbles)
+                const labels = [];
+                const counts = [];
+                for (let i = 0; i < hour_counts.length; i++) {
+                    if (hour_counts[i] > 0) {
+                        labels.push(`${i}:00`);
+                        counts.push(hour_counts[i]);
+                    }
+                }
+                
+                // Highlight the busiest hour slice
+                const backgroundColors = labels.map((label, idx) => {
+                    const hour = parseInt(label.split(':')[0]);
+                    return hour === busiest_hour ? '#ff6384' : '#36a2eb';
+                });
+                
+                const ctx = document.getElementById('clockPieChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: counts,
+                            backgroundColor: backgroundColors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'right' },
+                            tooltip: { callbacks: { label: (tooltipItem) => `${tooltipItem.label}: ${tooltipItem.raw} scrobbles` } }
+                        }
+                    }
+                });
+                
+                document.getElementById('busiestHourInfo').innerHTML = `🚀 Busiest hour: <strong>${busiest_hour}:00</strong> with <strong>${busiest_count}</strong> scrobbles`;
+            })
+            .catch(e => console.error('Listening clock error:', e));
     }
 
     // Recent scrobbles
@@ -1234,6 +1323,7 @@ SCROBBLES_TEMPLATE = """
                 loadScrobbles(currentOffset);
                 fetchStats();
                 fetchListeningTime();
+                fetchListeningClock();  // refresh clock after import
             })
             .catch(e => alert('Import failed: ' + e));
     }
@@ -1242,6 +1332,7 @@ SCROBBLES_TEMPLATE = """
     fetchNowPlaying();
     fetchStats();
     fetchListeningTime();
+    fetchListeningClock();
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
 </script>
@@ -1254,8 +1345,8 @@ if __name__ == '__main__':
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    print("✅ TIDAL HIFI PLAYER with listening time stats (hours per day/week/month/year)")
+    print("✅ TIDAL HIFI PLAYER with Listening Clock (pie chart + busiest hour)")
     print("📀 Scrobbles saved to scrobbles.db")
     print("🌐 Player: http://127.0.0.1:5000")
-    print("📊 Overview (Last.fm style + listening hours): http://127.0.0.1:5000/scrobbles")
+    print("📊 Overview (including listening clock): http://127.0.0.1:5000/scrobbles")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
