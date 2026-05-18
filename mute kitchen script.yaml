@@ -1,27 +1,105 @@
-# Go to home.google.com and create a new automation using the script editor
 metadata:
-  name: mute kitchen # Choose a short name that summarizes important starters and actions
-  description: Mutes the kitchen speaker for 180 seconds.
+  name: mute kitchen week/weekend
+  description: Mutes the kitchen speaker for 121s during the day, 140s on weekday evenings, 120s on weekend evenings, and 120s overnight.
 
 automations:
-  starters:
-    - type: assistant.event.OkGoogle
-      eventData: query
-      is: mute kitchen # <--- This is the voice command to trigger the automation
+  # --- 1. DAYTIME PROFILE (121 Seconds) ---
+  # Runs daily between 6:00 AM and 7:00 PM
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute kitchen
+    condition:
+      type: time.between
+      before: 19:00
+      after: 06:00
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting"
+        devices: Kitchen home - Kitchen
+      - type: device.command.Mute
+        mute: true
+        devices: Kitchen home - Kitchen
+      - type: time.delay
+        for: 121 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Kitchen home - Kitchen
 
-  actions:
-    # We use a broadcast here as a more reliable confirmation method
-    - type: assistant.command.Broadcast
-      message: "Muting the kitchen speaker for one hundred and eighty seconds"
-      devices: Kitchen home - Kitchen
+  # --- 2. WEEKDAY EVENING PROFILE (140 Seconds) ---
+  # Runs Monday to Friday between 7:00 PM and 10:00 PM
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute kitchen
+    condition:
+      type: time.between
+      before: 22:00
+      after: 19:00
+      weekdays:
+        - MON
+        - TUE
+        - WED
+        - THU
+        - FRI
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting for 140 seconds"
+        devices: Kitchen home - Kitchen
+      - type: device.command.Mute
+        mute: true
+        devices: Kitchen home - Kitchen
+      - type: time.delay
+        for: 140 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Kitchen home - Kitchen
 
-    - type: device.command.Mute
-      mute: true # Mute or unmute the given device.
-      devices: Kitchen home - Kitchen # Remove and choose your device from the list
+  # --- 3. WEEKEND EVENING PROFILE (125 Seconds) ---
+  # Runs Saturday and Sunday between 7:00 PM and 10:00 PM
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute kitchen
+    condition:
+      type: time.between
+      before: 22:00
+      after: 19:00
+      weekdays:
+        - SAT
+        - SUN
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting for 125 seconds"
+        devices: Kitchen home - Kitchen
+      - type: device.command.Mute
+        mute: true
+        devices: Kitchen home - Kitchen
+      - type: time.delay
+        for: 125 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Kitchen home - Kitchen
 
-    - type: time.delay
-      for: 180 sec # Adjust duration as needed. Supported units: sec, min, hour.
-
-    - type: device.command.Mute
-      mute: false # Mute or unmute the given device.
-      devices: Kitchen home - Kitchen # Remove and choose your device from the list
+  # --- 4. LATE NIGHT / OVERNIGHT PROFILE (120 Seconds) ---
+  # Runs daily between 10:00 PM and 6:00 AM (handles crossing midnight)
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute kitchen
+    condition:
+      type: time.between
+      before: 06:00
+      after: 22:00
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting for 120 seconds"
+        devices: Kitchen home - Kitchen
+      - type: device.command.Mute
+        mute: true
+        devices: Kitchen home - Kitchen
+      - type: time.delay
+        for: 120 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Kitchen home - Kitchen

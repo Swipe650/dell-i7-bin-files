@@ -1,6 +1,6 @@
 metadata:
-  name: mute bedroom week/weekend
-  description: Mutes the bedroom speaker for 121s during the day, 140s on weekday evenings, 120s on weekend evenings, and 120s overnight.
+  name: mute livingroom week/weekend
+  description: Mutes the livingroom speaker for 121s during the day, 140s on weekday evenings, 120s on weekend evenings, and 120s overnight.
 
 automations:
   # --- 1. DAYTIME PROFILE (121 Seconds) ---
@@ -8,7 +8,7 @@ automations:
   - starters:
       - type: assistant.event.OkGoogle
         eventData: query
-        is: mute bedroom
+        is: mute living room
     condition:
       type: time.between
       before: 19:00
@@ -16,22 +16,22 @@ automations:
     actions:
       - type: assistant.command.Broadcast
         message: "Muting for 121 seconds"
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: device.command.Mute
         mute: true
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: time.delay
         for: 121 sec
       - type: device.command.Mute
         mute: false
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
 
   # --- 2. WEEKDAY EVENING PROFILE (140 Seconds) ---
   # Runs Monday to Friday between 7:00 PM and 10:00 PM
   - starters:
       - type: assistant.event.OkGoogle
         eventData: query
-        is: mute bedroom
+        is: mute living room
     condition:
       type: time.between
       before: 22:00
@@ -45,22 +45,22 @@ automations:
     actions:
       - type: assistant.command.Broadcast
         message: "Muting for 140 seconds"
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: device.command.Mute
         mute: true
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: time.delay
         for: 140 sec
       - type: device.command.Mute
         mute: false
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
 
   # --- 3. WEEKEND EVENING PROFILE (125 Seconds) ---
   # Runs Saturday and Sunday between 7:00 PM and 10:00 PM
   - starters:
       - type: assistant.event.OkGoogle
         eventData: query
-        is: mute bedroom
+        is: mute living room
     condition:
       type: time.between
       before: 22:00
@@ -71,35 +71,35 @@ automations:
     actions:
       - type: assistant.command.Broadcast
         message: "Muting for 125 seconds"
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: device.command.Mute
         mute: true
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: time.delay
         for: 125 sec
       - type: device.command.Mute
         mute: false
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
 
   # --- 4. LATE NIGHT / OVERNIGHT PROFILE (120 Seconds) ---
   # Runs daily between 10:00 PM and 6:00 AM (handles crossing midnight)
   - starters:
       - type: assistant.event.OkGoogle
         eventData: query
-        is: mute bedroom
+        is: mute living room
     condition:
       type: time.between
       before: 06:00
       after: 22:00
     actions:
       - type: assistant.command.Broadcast
-        message: "Muting" # for 120 seconds"
-        devices: Bedroom mini - Bedroom
+        message: "Muting for 120 seconds"
+        devices: Living Room mini - Living Room
       - type: device.command.Mute
         mute: true
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
       - type: time.delay
         for: 120 sec
       - type: device.command.Mute
         mute: false
-        devices: Bedroom mini - Bedroom
+        devices: Living Room mini - Living Room
