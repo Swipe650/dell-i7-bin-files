@@ -9,7 +9,7 @@ import requests
 import sqlite3
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
@@ -124,6 +124,39 @@ def get_top_tracks(limit=25):
     rows = c.fetchall()
     conn.close()
     return [{"artist": row[0], "track": row[1], "playcount": row[2]} for row in rows]
+
+def get_listening_time():
+    """Return total listening hours for today, this week, this month, this year."""
+    now = datetime.now()
+    # Start of day (local midnight)
+    today_start = int(datetime(now.year, now.month, now.day).timestamp())
+    # Start of week (Monday)
+    week_start = int((now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    # Start of month
+    month_start = int(datetime(now.year, now.month, 1).timestamp())
+    # Start of year
+    year_start = int(datetime(now.year, 1, 1).timestamp())
+    
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
+    def sum_seconds(since_ts):
+        c.execute('SELECT SUM(duration_sec) FROM scrobbles WHERE timestamp >= ? AND duration_sec > 0', (since_ts,))
+        result = c.fetchone()[0]
+        return result if result else 0
+    
+    today_sec = sum_seconds(today_start)
+    week_sec = sum_seconds(week_start)
+    month_sec = sum_seconds(month_start)
+    year_sec = sum_seconds(year_start)
+    conn.close()
+    
+    return {
+        "today": round(today_sec / 3600, 1),
+        "week": round(week_sec / 3600, 1),
+        "month": round(month_sec / 3600, 1),
+        "year": round(year_sec / 3600, 1)
+    }
 
 def export_scrobbles_to_json():
     conn = sqlite3.connect(DATABASE)
@@ -303,7 +336,7 @@ def background_poller():
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
 
-# ------------------------- FLASK ROUTES (cloud routes removed) -------------------------
+# ------------------------- FLASK ROUTES -------------------------
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -344,6 +377,10 @@ def api_stats():
         "top_tracks": top_tracks,
         "total_scrobbles": total_scrobbles
     })
+
+@app.route('/api/listening_time')
+def api_listening_time():
+    return jsonify(get_listening_time())
 
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
@@ -578,16 +615,15 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
 </html>
 """
 
-# ------------------------- SCROBBLES OVERVIEW PAGE (cloud UI removed) -------------------------
+# ------------------------- SCROBBLES OVERVIEW PAGE (with listening time) -------------------------
 SCROBBLES_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
     <title>Scrobble Overview · TIDAL</title>
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='grad' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23e0e0e0'/%3E%3Cstop offset='70%25' stop-color='%23a0a0a0'/%3E%3Cstop offset='100%25' stop-color='%23404040'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23grad)' stroke='%23333' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23333'/%3E%3C/svg%3E">
-    <meta charset="UTF-8">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='grad' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23e0e0e0'/%3E%3Cstop offset='70%25' stop-color='%23a0a0a0'/%3E%3Cstop offset='100%25' stop-color='%23404040'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23grad)' stroke='%23333' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23333'/%3E%3C/svg%3E">
     <style>
         /* CSS variables for theming */
         :root {
@@ -717,7 +753,7 @@ SCROBBLES_TEMPLATE = """
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 1.5rem;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
         }
         .stat-card {
             background: var(--bg-card);
@@ -768,13 +804,47 @@ SCROBBLES_TEMPLATE = """
             border-radius: 3px;
         }
         .stat-list::-webkit-scrollbar-thumb {
-            background: #aaa;   /* or #888, #999, etc. – any grey you like - background: var(--accent); */
+            background: #aaa;
             border-radius: 3px;
+        }
+        body.dark .stat-list::-webkit-scrollbar-thumb {
+            background: #aaa;
+        }
+        .time-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 0.6rem 1rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            box-shadow: 0 1px 4px var(--shadow);
+            border: 1px solid var(--border-card);
+        }
+        .time-stats {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0;
+        }
+        .time-item {
+            text-align: center;
+            min-width: 70px;
+        }
+        .time-label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+        .time-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--accent);
         }
         .total-scrobbles {
             text-align: center;
-            font-size: 0.9rem;
-            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            margin-top: 0.3rem;
             color: var(--text-muted);
         }
         .tools {
@@ -920,6 +990,7 @@ SCROBBLES_TEMPLATE = """
             .scrobble-item { flex-wrap: wrap; }
             .scrobble-date { margin-left: 64px; text-align: left; width: 100%; }
             .now-playing { flex-direction: column; text-align: center; }
+            .time-stats { flex-direction: column; align-items: center; }
         }
     </style>
 </head>
@@ -947,13 +1018,23 @@ SCROBBLES_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Stats grid with scrollable lists (top 25) -->
+    <!-- Stats grid: Top Artists, Albums, Tracks -->
     <div class="stats-grid" id="statsGrid">
         <div class="stat-card"><h3>Top Artists</h3><ul class="stat-list" id="topArtistsList"><li>Loading...</li></ul></div>
         <div class="stat-card"><h3>Top Albums</h3><ul class="stat-list" id="topAlbumsList"><li>Loading...</li></ul></div>
         <div class="stat-card"><h3>Top Tracks</h3><ul class="stat-list" id="topTracksList"><li>Loading...</li></ul></div>
     </div>
-    <div class="total-scrobbles" id="totalScrobbles"></div>
+
+    <!-- Listening time card -->
+    <div class="time-card">
+        <div class="time-stats" id="listeningTime">
+            <div class="time-item"><div class="time-label">Today</div><div class="time-value" id="timeToday">-</div></div>
+            <div class="time-item"><div class="time-label">This Week</div><div class="time-value" id="timeWeek">-</div></div>
+            <div class="time-item"><div class="time-label">This Month</div><div class="time-value" id="timeMonth">-</div></div>
+            <div class="time-item"><div class="time-label">This Year</div><div class="time-value" id="timeYear">-</div></div>
+        </div>
+        <div class="total-scrobbles" id="totalScrobbles"></div>
+    </div>
 
     <!-- Tools: only export, import, refresh -->
     <div class="tools">
@@ -1006,6 +1087,19 @@ SCROBBLES_TEMPLATE = """
                 }
             })
             .catch(e => console.error('Now playing error:', e));
+    }
+
+    // Listening time fetch
+    function fetchListeningTime() {
+        fetch('/api/listening_time')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('timeToday').innerText = data.today + 'h';
+                document.getElementById('timeWeek').innerText = data.week + 'h';
+                document.getElementById('timeMonth').innerText = data.month + 'h';
+                document.getElementById('timeYear').innerText = data.year + 'h';
+            })
+            .catch(e => console.error('Listening time error:', e));
     }
 
     // Stats fetch (top 25)
@@ -1139,6 +1233,7 @@ SCROBBLES_TEMPLATE = """
                 alert(data.status || data.error);
                 loadScrobbles(currentOffset);
                 fetchStats();
+                fetchListeningTime();
             })
             .catch(e => alert('Import failed: ' + e));
     }
@@ -1146,6 +1241,7 @@ SCROBBLES_TEMPLATE = """
     // Initial loads
     fetchNowPlaying();
     fetchStats();
+    fetchListeningTime();
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
 </script>
@@ -1158,8 +1254,8 @@ if __name__ == '__main__':
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    print("✅ TIDAL HIFI PLAYER (clean version, no cloud options)")
+    print("✅ TIDAL HIFI PLAYER with listening time stats (hours per day/week/month/year)")
     print("📀 Scrobbles saved to scrobbles.db")
     print("🌐 Player: http://127.0.0.1:5000")
-    print("📊 Overview (Last.fm style, top 25 scrollable): http://127.0.0.1:5000/scrobbles")
+    print("📊 Overview (Last.fm style + listening hours): http://127.0.0.1:5000/scrobbles")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
