@@ -32,9 +32,9 @@ check_top_of_the_hour() {
 
     # Check for TalkRadio
     if [ -f .tr ]; then
-        if [[ "$currenttime" =~ ^(00|01|02|03|04|58|59)$ ]]; then
+        if [[ "$currenttime" =~ ^(01|02|03|04|58|59)$ ]]; then
             mute
-            sleep 180
+            sleep 50
             unmute
         elif [[ "$currenttime" =~ ^(32|33|34|35|36|37|05|06|07)$ ]]; then
             mute
