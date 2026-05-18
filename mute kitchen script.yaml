@@ -1,0 +1,27 @@
+# Go to home.google.com and create a new automation using the script editor
+metadata:
+  name: mute kitchen # Choose a short name that summarizes important starters and actions
+  description: Mutes the kitchen speaker for 180 seconds.
+
+automations:
+  starters:
+    - type: assistant.event.OkGoogle
+      eventData: query
+      is: mute kitchen # <--- This is the voice command to trigger the automation
+
+  actions:
+    # We use a broadcast here as a more reliable confirmation method
+    - type: assistant.command.Broadcast
+      message: "Muting the kitchen speaker for one hundred and eighty seconds"
+      devices: Kitchen home - Kitchen
+
+    - type: device.command.Mute
+      mute: true # Mute or unmute the given device.
+      devices: Kitchen home - Kitchen # Remove and choose your device from the list
+
+    - type: time.delay
+      for: 180 sec # Adjust duration as needed. Supported units: sec, min, hour.
+
+    - type: device.command.Mute
+      mute: false # Mute or unmute the given device.
+      devices: Kitchen home - Kitchen # Remove and choose your device from the list

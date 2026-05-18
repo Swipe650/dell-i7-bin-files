@@ -1,0 +1,73 @@
+metadata:
+  name: mute bedroom
+  description: Mutes the bedroom speaker for 120s during the day, 140s in the evening, and 120s overnight.
+
+automations:
+  # --- 1. DAYTIME PROFILE (120 Seconds) ---
+  # Runs between 6:00 AM and 7:00 PM
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute bedroom
+    condition:
+      type: time.between
+      before: 19:00
+      after: 06:00
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting for 120 seconds"
+        devices: Bedroom mini - Bedroom
+      - type: device.command.Mute
+        mute: true
+        devices: Bedroom mini - Bedroom
+      - type: time.delay
+        for: 120 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Bedroom mini - Bedroom
+
+  # --- 2. EVENING PROFILE (140 Seconds) ---
+  # Runs between 7:00 PM and 10:00 PM
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute bedroom
+    condition:
+      type: time.between
+      before: 22:00
+      after: 19:00
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting for 140 seconds"
+        devices: Bedroom mini - Bedroom
+      - type: device.command.Mute
+        mute: true
+        devices: Bedroom mini - Bedroom
+      - type: time.delay
+        for: 140 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Bedroom mini - Bedroom
+
+  # --- 3. LATE NIGHT / OVERNIGHT PROFILE (120 Seconds) ---
+  # Runs between 10:00 PM and 6:00 AM (handles crossing midnight)
+  - starters:
+      - type: assistant.event.OkGoogle
+        eventData: query
+        is: mute bedroom
+    condition:
+      type: time.between
+      before: 06:00
+      after: 22:00
+    actions:
+      - type: assistant.command.Broadcast
+        message: "Muting for 120 seconds"
+        devices: Bedroom mini - Bedroom
+      - type: device.command.Mute
+        mute: true
+        devices: Bedroom mini - Bedroom
+      - type: time.delay
+        for: 120 sec
+      - type: device.command.Mute
+        mute: false
+        devices: Bedroom mini - Bedroom
