@@ -1336,10 +1336,14 @@ MONTHLY_TEMPLATE = """
         .tables-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
         .table-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; border: 1px solid var(--border-card); }
         .table-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
-        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; }
+        .stat-list { list-style: none; padding: 0 5px 0 0; margin: 0; max-height: 300px; overflow-y: auto; }
         .stat-list li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
         .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
-        .stat-count { font-weight: 600; color: var(--accent); }
+        .stat-count { font-weight: 600; color: var(--accent); margin-left: auto; flex-shrink: 0; }
+        .stat-list::-webkit-scrollbar { width: 6px; }
+        .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
+        .stat-list::-webkit-scrollbar-thumb { background: #aaa; border-radius: 3px; }
+        body.dark .stat-list::-webkit-scrollbar-thumb { background: #aaa; }
         canvas { max-height: 300px; margin-top: 1rem; }
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
     </style>
@@ -1380,68 +1384,108 @@ MONTHLY_TEMPLATE = """
 </div>
 
 <script>
-    function loadReport() {
+    let clockChart = null;
+
+    async function loadReport() {
         const monthInput = document.getElementById('monthPicker').value;
-        if (!monthInput) return;
+        if (!monthInput) {
+            console.error("No month selected");
+            return;
+        }
         const [year, month] = monthInput.split('-');
         const contentDiv = document.getElementById('reportContent');
         const loadingMsg = document.getElementById('loadingMsg');
+        
         loadingMsg.style.display = 'block';
         loadingMsg.innerText = 'Loading report...';
         contentDiv.style.display = 'none';
-
-        fetch(`/api/monthly_report?year=${year}&month=${month}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    loadingMsg.innerText = `Error: ${data.error}`;
-                    return;
+        
+        console.log(`Fetching monthly report for year=${year}, month=${month}`);
+        
+        try {
+            const response = await fetch(`/api/monthly_report?year=${year}&month=${month}`);
+            console.log("Response status:", response.status);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}`);
+            }
+            
+            const data = await response.json();
+            console.log("Received data:", data);
+            
+            if (data.error) {
+                loadingMsg.innerText = `Error: ${data.error}`;
+                console.error("API error:", data.error);
+                return;
+            }
+            
+            document.getElementById('totalScrobbles').innerText = data.total_scrobbles;
+            document.getElementById('totalHours').innerText = data.total_hours;
+            
+            const artistsList = document.getElementById('topArtists');
+            if (data.top_artists.length === 0) {
+                artistsList.innerHTML = '<li>No scrobbles in this month</li>';
+            } else {
+                artistsList.innerHTML = data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.count}</span></li>`).join('');
+            }
+            
+            const albumsList = document.getElementById('topAlbums');
+            if (data.top_albums.length === 0) {
+                albumsList.innerHTML = '<li>No albums in this month</li>';
+            } else {
+                albumsList.innerHTML = data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.count}</span></li>`).join('');
+            }
+            
+            const tracksList = document.getElementById('topTracks');
+            if (data.top_tracks.length === 0) {
+                tracksList.innerHTML = '<li>No tracks in this month</li>';
+            } else {
+                tracksList.innerHTML = data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.count}</span></li>`).join('');
+            }
+            
+            const ctx = document.getElementById('clockChart').getContext('2d');
+            if (clockChart) clockChart.destroy();
+            clockChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+                    datasets: [{
+                        label: 'Scrobbles',
+                        data: data.hour_counts,
+                        backgroundColor: '#36a2eb',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Scrobbles' } },
+                              x: { title: { display: true, text: 'Hour of Day' } } }
                 }
-                document.getElementById('totalScrobbles').innerText = data.total_scrobbles;
-                document.getElementById('totalHours').innerText = data.total_hours;
-
-                document.getElementById('topArtists').innerHTML = data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.count}</span></li>`).join('') || '<li>No data</li>';
-                document.getElementById('topAlbums').innerHTML = data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.count}</span></li>`).join('') || '<li>No data</li>';
-                document.getElementById('topTracks').innerHTML = data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.count}</span></li>`).join('') || '<li>No data</li>';
-
-                const ctx = document.getElementById('clockChart').getContext('2d');
-                if (window.clockChart) window.clockChart.destroy();
-                window.clockChart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: Array.from({length: 24}, (_, i) => `${i}:00`),
-                        datasets: [{
-                            label: 'Scrobbles',
-                            data: data.hour_counts,
-                            backgroundColor: '#36a2eb',
-                            borderRadius: 4
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true } } }
-                });
-
-                loadingMsg.style.display = 'none';
-                contentDiv.style.display = 'block';
-            })
-            .catch(e => {
-                console.error(e);
-                loadingMsg.innerText = 'Error loading report. See console.';
             });
+            
+            loadingMsg.style.display = 'none';
+            contentDiv.style.display = 'block';
+            
+        } catch (err) {
+            console.error("Fetch error:", err);
+            loadingMsg.innerText = `Error loading report: ${err.message}. See console.`;
+            loadingMsg.style.color = 'var(--accent)';
+        }
     }
-
+    
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
     }
-
-    // Set current month as default
+    
     const now = new Date();
     document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
-    loadReport(); // load current month on page load
-
-    // Theme sync (optional: copy from localStorage)
+    
     if (localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
+    
+    loadReport();
 </script>
 </body>
 </html>
