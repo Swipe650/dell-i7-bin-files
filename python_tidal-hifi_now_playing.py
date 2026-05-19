@@ -1023,7 +1023,7 @@ SCROBBLES_TEMPLATE = """
         </div>
         <div style="display: flex; gap: 10px;">
             <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()">🌓 Dark/Light</button>
-            <a href="/" class="player-link">◀ Now Playing (full)</a>
+            <a href="/" class="player-link" target="_blank">◀ Now Playing (full)</a>
             <a href="/monthly" class="report-link" target="_blank">📅 Monthly Reports</a>
         </div>
     </div>
