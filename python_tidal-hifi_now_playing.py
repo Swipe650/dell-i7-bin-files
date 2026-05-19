@@ -9,6 +9,8 @@ import requests
 import sqlite3
 import json
 import os
+import pylast
+import keyring
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
@@ -21,6 +23,14 @@ POLL_INTERVAL = 1
 DATABASE = "scrobbles.db"
 SCROBBLE_THRESHOLD = 0.5
 MIN_SECONDS_TO_SCROBBLE = 240
+
+# Last.fm configuration
+LASTFM_SERVICE_NAME = "LastFM"
+LASTFM_API_KEY = None
+LASTFM_API_SECRET = None
+LASTFM_USERNAME = None
+LASTFM_PASSWORD = None
+LASTFM_NETWORK = None
 
 album_cache = {}
 last_cached_album = None
@@ -36,9 +46,102 @@ current_track_data = {
 }
 
 session = {
-    "current_track_id": None, "track_start_time": 0, "max_position": 0,
-    "last_track_data": None, "lock": threading.Lock()
+    "current_track_id": None, "track_start_time": 0, "track_start_timestamp": 0,
+    "max_position": 0, "last_track_data": None, "lock": threading.Lock()
 }
+
+# ------------------------- LAST.FM INTEGRATION -------------------------
+def get_lastfm_credentials():
+    """Retrieve Last.fm credentials from system keyring."""
+    global LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD
+    
+    try:
+        LASTFM_USERNAME = keyring.get_password(LASTFM_SERVICE_NAME, "username")
+        LASTFM_API_KEY = keyring.get_password(LASTFM_SERVICE_NAME, "api_key")
+        LASTFM_API_SECRET = keyring.get_password(LASTFM_SERVICE_NAME, "api_secret")
+        LASTFM_PASSWORD = keyring.get_password(LASTFM_SERVICE_NAME, "password")
+        
+        if all([LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_PASSWORD]):
+            print(f"✅ Last.fm credentials loaded for user: {LASTFM_USERNAME}")
+            return True
+        else:
+            print("⚠️  Last.fm credentials not found in keyring (run lastfm_creds.py store)")
+            return False
+    except Exception as e:
+        print(f"❌ Error loading Last.fm credentials: {e}")
+        return False
+
+def get_lastfm_network():
+    """Return authenticated Last.fm network object."""
+    global LASTFM_NETWORK
+    
+    if LASTFM_NETWORK:
+        return LASTFM_NETWORK
+    
+    if not all([LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD]):
+        if not get_lastfm_credentials():
+            return None
+    
+    try:
+        password_hash = pylast.md5(LASTFM_PASSWORD)
+        LASTFM_NETWORK = pylast.LastFMNetwork(
+            api_key=LASTFM_API_KEY,
+            api_secret=LASTFM_API_SECRET,
+            username=LASTFM_USERNAME,
+            password_hash=password_hash
+        )
+        LASTFM_NETWORK.get_authenticated_user()
+        print(f"✅ Authenticated with Last.fm as: {LASTFM_USERNAME}")
+        return LASTFM_NETWORK
+    except Exception as e:
+        print(f"❌ Last.fm authentication failed: {e}")
+        return None
+
+def scrobble_to_lastfm(track, artist, album, timestamp, duration_sec):
+    """Send a scrobble to Last.fm."""
+    network = get_lastfm_network()
+    if not network:
+        return False
+
+    try:
+        # Use the network.scrobble method directly.
+        network.scrobble(
+            artist=artist,
+            title=track,
+            album=album,
+            timestamp=timestamp,
+            # Note: The 'duration' parameter is not supported by the scrobble method.
+        )
+        print(f"📡 Scrobbled to Last.fm: {artist} - {track}")
+        return True
+    except pylast.WSError as e:
+        if e.details == "This track is currently not available for scrobbling":
+            print(f"⚠️  Cannot scrobble {artist} - {track}: {e.details}")
+        else:
+            print(f"❌ Last.fm scrobble error: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Last.fm scrobble error: {e}")
+        return False
+
+def update_now_playing(track, artist, album, duration_sec):
+    """Update 'now playing' on Last.fm."""
+    network = get_lastfm_network()
+    if not network:
+        return False
+    
+    try:
+        network.update_now_playing(
+            artist=artist,
+            title=track,
+            album=album,
+            # duration is optional; the API may accept it but it's not required
+        )
+        print(f"📡 Updated 'now playing' on Last.fm: {artist} - {track}")
+        return True
+    except Exception as e:
+        print(f"⚠️  Could not update 'now playing' on Last.fm: {e}")
+        return False
 
 # ------------------------- DATABASE -------------------------
 def init_db():
@@ -55,21 +158,40 @@ def init_db():
         quality TEXT,
         bit_depth INTEGER,
         sample_rate INTEGER,
-        codec TEXT
+        codec TEXT,
+        playlist TEXT,
+        lastfm_scrobbled INTEGER DEFAULT 0
     )''')
     conn.commit()
     conn.close()
+    migrate_db()
 
-def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec):
+def migrate_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(scrobbles)")
+    columns = [col[1] for col in c.fetchall()]
+    if 'playlist' not in columns:
+        c.execute("ALTER TABLE scrobbles ADD COLUMN playlist TEXT")
+    if 'lastfm_scrobbled' not in columns:
+        c.execute("ALTER TABLE scrobbles ADD COLUMN lastfm_scrobbled INTEGER DEFAULT 0")
+    conn.commit()
+    conn.close()
+
+def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
+    timestamp = int(time.time())
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute('''INSERT INTO scrobbles 
-        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (int(time.time()), track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec))
+        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, 0))
     conn.commit()
     conn.close()
-    print(f"Scrobbled: {artist} - {track}")
+    print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else ""))
+    
+    # Send to Last.fm
+    scrobble_to_lastfm(track, artist, album, timestamp, duration_sec)
 
 def get_all_scrobbles(limit=100, offset=0):
     conn = sqlite3.connect(DATABASE)
@@ -125,8 +247,20 @@ def get_top_tracks(limit=25):
     conn.close()
     return [{"artist": row[0], "track": row[1], "playcount": row[2]} for row in rows]
 
+def get_top_playlists(limit=25):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''SELECT playlist, COUNT(*) as count 
+                 FROM scrobbles 
+                 WHERE playlist IS NOT NULL AND playlist != ''
+                 GROUP BY playlist 
+                 ORDER BY count DESC 
+                 LIMIT ?''', (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return [{"playlist": row[0], "count": row[1]} for row in rows]
+
 def get_listening_time():
-    """Return total listening hours for today, this week, this month, this year."""
     now = datetime.now()
     today_start = int(datetime(now.year, now.month, now.day).timestamp())
     week_start = int((now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
@@ -172,11 +306,12 @@ def import_scrobbles_from_json(data):
                   (item['timestamp'], item['track'], item['artist']))
         if not c.fetchone():
             c.execute('''INSERT INTO scrobbles 
-                (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (item['timestamp'], item['track'], item['artist'], item.get('album'),
                  item.get('art_url'), item.get('duration_sec'), item.get('quality'),
-                 item.get('bit_depth'), item.get('sample_rate'), item.get('codec')))
+                 item.get('bit_depth'), item.get('sample_rate'), item.get('codec'), 
+                 item.get('playlist'), 0))
             inserted += 1
     conn.commit()
     conn.close()
@@ -222,13 +357,16 @@ def fetch_http_details():
         art = data.get("image", "")
         album_name = data.get("album", "")
         artist_name = data.get("artist", "")
+        playing_from = data.get("playingFrom", "Unknown")
 
         current_track_data["art"] = art
         player = data.get("player", {})
         current_track_data["shuffle"] = "on" if player.get("shuffle") else "off"
         current_track_data["repeat"] = player.get("repeat", "OFF")
         current_track_data["volume"] = round(data.get("volume", 0) * 100)
-        current_track_data["playing_from"] = f"Playing from: {data.get('playingFrom', 'Unknown')}"
+        current_track_data["playing_from"] = f"Playing from: {playing_from}"
+        current_track_data["album"] = album_name
+        current_track_data["artist"] = artist_name
 
         has_detailed = (bit_depth > 0 and sample_rate > 0) or (badge_text and ('kHz' in badge_text or 'kbps' in badge_text))
         if has_detailed and album_name and artist_name:
@@ -287,26 +425,40 @@ def background_poller():
                 if track_changed and session["last_track_data"]:
                     if maybe_scrobble(session["last_track_data"], session["max_position"], session["last_track_data"]["duration_sec"]):
                         ld = session["last_track_data"]
+                        playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+                        album_name = current_track_data.get("album", "")
+                        playlist_name = playing_from if playing_from != album_name else None
                         add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
-                                     ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"])
+                                     ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     session["last_track_data"] = None
+                
                 if track_changed or not session["last_track_data"]:
+                    # Store track start timestamp for Last.fm
+                    track_start_timestamp = int(time.time())
+                    session["track_start_timestamp"] = track_start_timestamp
                     session["last_track_data"] = {
                         "track": title, "artist": meta["artist"], "album": meta["album"],
                         "art_url": current_track_data.get("art", ""), "duration_sec": meta["duration_sec"],
                         "quality": current_track_data.get("quality", "low"),
                         "bit_depth": current_track_data.get("bitDepth", 0),
                         "sample_rate": current_track_data.get("sampleRate", 0),
-                        "codec": current_track_data.get("codec", "")
+                        "codec": current_track_data.get("codec", ""),
+                        "start_timestamp": track_start_timestamp
                     }
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     last_title = title
+                    
+                    # Update "now playing" on Last.fm
+                    if track_changed:
+                        update_now_playing(title, meta["artist"], meta["album"], meta["duration_sec"])
+                
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
+            
             current_track_data["track"] = title
             current_track_data["artist"] = meta["artist"]
             current_track_data["album"] = meta["album"]
@@ -321,7 +473,9 @@ def background_poller():
             secs = int(pos % 60)
             current_track_data["current"] = f"{mins}:{secs:02d}"
             current_track_data["progress"] = round(progress, 1)
+        
         fetch_http_details()
+        
         with session["lock"]:
             if session["last_track_data"]:
                 session["last_track_data"]["art_url"] = current_track_data.get("art", session["last_track_data"]["art_url"])
@@ -329,6 +483,7 @@ def background_poller():
                 session["last_track_data"]["bit_depth"] = current_track_data.get("bitDepth", session["last_track_data"]["bit_depth"])
                 session["last_track_data"]["sample_rate"] = current_track_data.get("sampleRate", session["last_track_data"]["sample_rate"])
                 session["last_track_data"]["codec"] = current_track_data.get("codec", session["last_track_data"]["codec"])
+        
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
 
@@ -382,7 +537,6 @@ def api_listening_time():
 def api_listening_clock():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    # Get scrobble count per hour of day (0-23)
     c.execute("""
         SELECT 
             strftime('%H', datetime(timestamp, 'unixepoch')) as hour,
@@ -393,28 +547,82 @@ def api_listening_clock():
     """)
     rows = c.fetchall()
     conn.close()
-    
     hour_counts = [0] * 24
     for row in rows:
-        hour = int(row[0])
-        hour_counts[hour] = row[1]
-    
+        hour_counts[int(row[0])] = row[1]
     max_count = max(hour_counts) if hour_counts else 0
     busiest_hour = hour_counts.index(max_count) if max_count > 0 else 0
-    
     return jsonify({
         "hour_counts": hour_counts,
         "busiest_hour": busiest_hour,
         "busiest_hour_count": max_count
     })
 
+@app.route('/api/scrobbles_by_weekday')
+def api_scrobbles_by_weekday():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT strftime('%w', datetime(timestamp, 'unixepoch')) as wd, COUNT(*)
+        FROM scrobbles
+        GROUP BY wd
+        ORDER BY wd
+    """)
+    rows = c.fetchall()
+    conn.close()
+    day_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    result = [{"day": day_names[int(r[0])], "count": r[1]} for r in rows]
+    return jsonify(result)
+
+@app.route('/api/top_artists_by_time')
+def api_top_artists_by_time():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT artist, SUM(duration_sec) as total_seconds
+        FROM scrobbles
+        WHERE duration_sec > 0
+        GROUP BY artist
+        ORDER BY total_seconds DESC
+        LIMIT 25
+    """)
+    rows = c.fetchall()
+    conn.close()
+    result = [{"artist": row[0], "hours": round(row[1] / 3600, 1)} for row in rows]
+    return jsonify(result)
+
+@app.route('/api/longest_listening_day')
+def api_longest_listening_day():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT DATE(datetime(timestamp, 'unixepoch')) as day, COUNT(*) as scrobble_count
+        FROM scrobbles
+        GROUP BY day
+        ORDER BY scrobble_count DESC
+        LIMIT 1
+    """)
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return jsonify({"date": row[0], "scrobbles": row[1]})
+    return jsonify({"date": None, "scrobbles": 0})
+
+@app.route('/api/top_playlists')
+def api_top_playlists():
+    top = get_top_playlists(25)
+    return jsonify(top)
+
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
     with session["lock"]:
         if session["last_track_data"] and session["last_track_data"]["track"]:
             ld = session["last_track_data"]
+            playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+            album_name = current_track_data.get("album", "")
+            playlist_name = playing_from if playing_from != album_name else None
             add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
-                         ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"])
+                         ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
             return jsonify({"status": "scrobbled"})
     return jsonify({"status": "no track playing"}), 400
 
@@ -491,7 +699,7 @@ def view_cache():
     html += "</ul><p><a href='/'>Back</a></p>"
     return html
 
-# ------------------------- MAIN PLAYER PAGE (unchanged) -------------------------
+# ------------------------- HTML TEMPLATES (same as before) -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -641,7 +849,6 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
 </html>
 """
 
-# ------------------------- SCROBBLES OVERVIEW PAGE (with listening clock pie chart) -------------------------
 SCROBBLES_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -689,341 +896,66 @@ SCROBBLES_TEMPLATE = """
             --art-bg: #2c2c2c;
         }
         * { box-sizing: border-box; }
-        body {
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            background: var(--bg-body);
-            margin: 0;
-            padding: 0;
-            color: var(--text-primary);
-            transition: background 0.2s, color 0.2s;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem 1rem;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            flex-wrap: wrap;
-            margin-bottom: 2rem;
-            border-bottom: 1px solid var(--border-light);
-            padding-bottom: 1rem;
-        }
-        h1 {
-            font-size: 1.8rem;
-            font-weight: 500;
-            margin: 0;
-            color: var(--accent);
-            letter-spacing: -0.5px;
-        }
-        .sub {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-        }
-        .player-link {
-            background: var(--button-bg);
-            border: 1px solid var(--button-border);
-            padding: 0.4rem 1rem;
-            border-radius: 20px;
-            text-decoration: none;
-            color: var(--accent);
-            font-size: 0.85rem;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-        .player-link:hover {
-            background: var(--accent);
-            color: white;
-            border-color: var(--accent);
-        }
-        .now-playing {
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            display: flex;
-            gap: 1.5rem;
-            align-items: center;
-            box-shadow: 0 2px 8px var(--shadow);
-            border: 1px solid var(--border-card);
-        }
-        .now-art {
-            width: 80px;
-            height: 80px;
-            border-radius: 12px;
-            object-fit: cover;
-            background: var(--art-bg);
-        }
-        .now-info {
-            flex: 1;
-        }
-        .now-label {
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--accent);
-            font-weight: 600;
-        }
-        .now-track {
-            font-size: 1.4rem;
-            font-weight: 600;
-            margin: 0.2rem 0;
-        }
-        .now-artist, .now-album {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .stat-card {
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 1rem;
-            box-shadow: 0 1px 4px var(--shadow);
-            border: 1px solid var(--border-card);
-        }
-        .stat-card h3 {
-            margin: 0 0 1rem 0;
-            font-size: 1.2rem;
-            font-weight: 500;
-            color: var(--accent);
-            border-left: 3px solid var(--accent);
-            padding-left: 0.75rem;
-        }
-        .stat-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-            max-height: 300px;
-            overflow-y: auto;
-            padding-right: 5px;
-        }
-        .stat-list li {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.5rem 0;
-            border-bottom: 1px solid var(--border-card);
-            font-size: 0.9rem;
-        }
-        .stat-list li span:first-child {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            padding-right: 1rem;
-        }
-        .stat-count {
-            font-weight: 600;
-            color: var(--accent);
-            flex-shrink: 0;
-        }
-        .stat-list::-webkit-scrollbar {
-            width: 6px;
-        }
-        .stat-list::-webkit-scrollbar-track {
-            background: var(--border-card);
-            border-radius: 3px;
-        }
-        .stat-list::-webkit-scrollbar-thumb {
-            background: #aaa;
-            border-radius: 3px;
-        }
-        body.dark .stat-list::-webkit-scrollbar-thumb {
-            background: #aaa;
-        }
-        .time-card {
-            background: var(--bg-card);
-            border-radius: 16px;
-            padding: 0.6rem 1rem;
-            margin-bottom: 1.5rem;
-            text-align: center;
-            box-shadow: 0 1px 4px var(--shadow);
-            border: 1px solid var(--border-card);
-        }
-        .time-stats {
-            display: flex;
-            justify-content: space-around;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            margin-top: 0;
-        }
-        .time-item {
-            text-align: center;
-            min-width: 70px;
-        }
-        .time-label {
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--text-muted);
-        }
-        .time-value {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--accent);
-        }
-        .total-scrobbles {
-            text-align: center;
-            font-size: 0.8rem;
-            margin-top: 0.3rem;
-            color: var(--text-muted);
-        }
-        .tools {
-            background: var(--bg-tools);
-            border-radius: 12px;
-            padding: 1rem;
-            margin-bottom: 2rem;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            align-items: center;
-            box-shadow: 0 1px 3px var(--shadow);
-            border: 1px solid var(--border-card);
-        }
-        .tools button, .tools label {
-            background: var(--button-bg);
-            border: 1px solid var(--button-border);
-            padding: 0.5rem 1rem;
-            border-radius: 30px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            font-family: inherit;
-            transition: all 0.2s;
-            color: var(--text-primary);
-        }
-        .tools button:hover, .tools label:hover {
-            background: var(--button-hover);
-            border-color: var(--text-muted);
-        }
-        .theme-toggle {
-            background: var(--button-bg);
-            border: 1px solid var(--button-border);
-            border-radius: 30px;
-            padding: 0.5rem 1rem;
-            font-size: 0.8rem;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .scrobble-list {
-            background: var(--bg-card);
-            border-radius: 16px;
-            box-shadow: 0 1px 4px var(--shadow);
-            overflow: hidden;
-            border: 1px solid var(--border-card);
-            margin-top: 1rem;
-        }
-        .scrobble-item {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 1rem;
-            border-bottom: 1px solid var(--border-card);
-            transition: background 0.15s;
-        }
-        .scrobble-item:hover {
-            background: var(--hover-row);
-        }
-        .album-art {
-            flex-shrink: 0;
-            width: 56px;
-            height: 56px;
-            border-radius: 8px;
-            object-fit: cover;
-            background: var(--art-bg);
-            box-shadow: 0 1px 2px var(--shadow);
-        }
-        .track-info {
-            flex: 1;
-            min-width: 0;
-        }
-        .track-name {
-            font-weight: 600;
-            font-size: 1rem;
-            color: var(--text-primary);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .artist-name {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-            margin-top: 2px;
-        }
-        .album-name {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            margin-top: 2px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .scrobble-date {
-            flex-shrink: 0;
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            text-align: right;
-            min-width: 120px;
-        }
-        .pagination {
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
-            margin-top: 2rem;
-            align-items: center;
-        }
-        .pagination button {
-            background: var(--button-bg);
-            border: 1px solid var(--button-border);
-            padding: 0.5rem 1rem;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: all 0.2s;
-            color: var(--text-primary);
-        }
-        .pagination button:hover:not(:disabled) {
-            background: var(--button-hover);
-            border-color: var(--text-muted);
-        }
-        .pagination button:disabled {
-            opacity: 0.4;
-            cursor: default;
-        }
-        .pagination span {
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-        .empty-message {
-            padding: 3rem;
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 0.9rem;
-        }
-        footer {
-            margin-top: 3rem;
-            text-align: center;
-            font-size: 0.7rem;
-            color: var(--text-muted);
-        }
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: var(--bg-body); margin: 0; padding: 0; color: var(--text-primary); transition: background 0.2s, color 0.2s; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }
+        .header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; margin-bottom: 2rem; border-bottom: 1px solid var(--border-light); padding-bottom: 1rem; }
+        h1 { font-size: 1.8rem; font-weight: 500; margin: 0; color: var(--accent); letter-spacing: -0.5px; }
+        .sub { color: var(--text-muted); font-size: 0.85rem; }
+        .player-link { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.4rem 1rem; border-radius: 20px; text-decoration: none; color: var(--accent); font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
+        .player-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
+        .now-playing { background: var(--bg-card); border-radius: 16px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1.5rem; align-items: center; box-shadow: 0 2px 8px var(--shadow); border: 1px solid var(--border-card); }
+        .now-art { width: 80px; height: 80px; border-radius: 12px; object-fit: cover; background: var(--art-bg); }
+        .now-info { flex: 1; }
+        .now-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--accent); font-weight: 600; }
+        .now-track { font-size: 1.4rem; font-weight: 600; margin: 0.2rem 0; }
+        .now-artist, .now-album { color: var(--text-secondary); font-size: 0.9rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+        .stat-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; box-shadow: 0 1px 4px var(--shadow); border: 1px solid var(--border-card); }
+        .stat-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; font-weight: 500; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
+        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; padding-right: 5px; }
+        .stat-list li { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-card); font-size: 0.9rem; }
+        .stat-list li span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
+        .stat-count { font-weight: 600; color: var(--accent); flex-shrink: 0; }
+        .stat-list::-webkit-scrollbar { width: 6px; }
+        .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
+        .stat-list::-webkit-scrollbar-thumb { background: #aaa; border-radius: 3px; }
+        body.dark .stat-list::-webkit-scrollbar-thumb { background: #aaa; }
+        .time-card { background: var(--bg-card); border-radius: 16px; padding: 0.6rem 1rem; margin-bottom: 1.5rem; text-align: center; box-shadow: 0 1px 4px var(--shadow); border: 1px solid var(--border-card); }
+        .time-stats { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.5rem; margin-top: 0; }
+        .time-item { text-align: center; min-width: 70px; }
+        .time-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+        .time-value { font-size: 1.2rem; font-weight: 600; color: var(--accent); }
+        .total-scrobbles { text-align: center; font-size: 0.8rem; margin-top: 0.3rem; color: var(--text-muted); }
+        .tools { background: var(--bg-tools); border-radius: 12px; padding: 1rem; margin-bottom: 2rem; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; box-shadow: 0 1px 3px var(--shadow); border: 1px solid var(--border-card); }
+        .tools button, .tools label { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; font-size: 0.8rem; cursor: pointer; font-family: inherit; transition: all 0.2s; color: var(--text-primary); }
+        .tools button:hover, .tools label:hover { background: var(--button-hover); border-color: var(--text-muted); }
+        .theme-toggle { background: var(--button-bg); border: 1px solid var(--button-border); border-radius: 30px; padding: 0.5rem 1rem; font-size: 0.8rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+        .scrobble-list { background: var(--bg-card); border-radius: 16px; box-shadow: 0 1px 4px var(--shadow); overflow: hidden; border: 1px solid var(--border-card); margin-top: 1rem; }
+        .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
+        .scrobble-item:hover { background: var(--hover-row); }
+        .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--art-bg); box-shadow: 0 1px 2px var(--shadow); }
+        .track-info { flex: 1; min-width: 0; }
+        .track-name { font-weight: 600; font-size: 1rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .artist-name { font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px; }
+        .album-name { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .scrobble-date { flex-shrink: 0; font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 120px; }
+        .pagination { display: flex; justify-content: center; gap: 1rem; margin-top: 2rem; align-items: center; }
+        .pagination button { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s; color: var(--text-primary); }
+        .pagination button:hover:not(:disabled) { background: var(--button-hover); border-color: var(--text-muted); }
+        .pagination button:disabled { opacity: 0.4; cursor: default; }
+        .pagination span { font-size: 0.85rem; color: var(--text-secondary); }
+        .empty-message { padding: 3rem; text-align: center; color: var(--text-muted); font-size: 0.9rem; }
+        footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
         @media (max-width: 700px) {
             .scrobble-item { flex-wrap: wrap; }
             .scrobble-date { margin-left: 64px; text-align: left; width: 100%; }
             .now-playing { flex-direction: column; text-align: center; }
             .time-stats { flex-direction: column; align-items: center; }
         }
-        canvas {
-            max-height: 250px;
-            width: auto;
-            margin: 0 auto;
-            display: block;
-        }
+        canvas { max-height: 250px; width: auto; margin: 0 auto; display: block; }
+        .new-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+        .highlight-text { text-align: center; font-size: 1.1rem; margin: 0.5rem 0; }
+        #clockPieChart { margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -1039,7 +971,6 @@ SCROBBLES_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Now Playing section -->
     <div class="now-playing" id="nowPlaying">
         <img id="nowArt" class="now-art" src="" alt="album art">
         <div class="now-info">
@@ -1050,14 +981,12 @@ SCROBBLES_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Stats grid: Top Artists, Albums, Tracks -->
     <div class="stats-grid" id="statsGrid">
-        <div class="stat-card"><h3>Top Artists</h3><ul class="stat-list" id="topArtistsList"><li>Loading...</li></ul></div>
+        <div class="stat-card"><h3>Top Artists (by playcount)</h3><ul class="stat-list" id="topArtistsList"><li>Loading...</li></ul></div>
         <div class="stat-card"><h3>Top Albums</h3><ul class="stat-list" id="topAlbumsList"><li>Loading...</li></ul></div>
         <div class="stat-card"><h3>Top Tracks</h3><ul class="stat-list" id="topTracksList"><li>Loading...</li></ul></div>
     </div>
 
-    <!-- Listening time card -->
     <div class="time-card">
         <div class="time-stats" id="listeningTime">
             <div class="time-item"><div class="time-label">Today</div><div class="time-value" id="timeToday">-</div></div>
@@ -1068,14 +997,30 @@ SCROBBLES_TEMPLATE = """
         <div class="total-scrobbles" id="totalScrobbles"></div>
     </div>
 
-    <!-- Listening Clock Pie Chart -->
-    <div class="stat-card">
-        <h3>🕒 Listening Clock (Busiest Hours)</h3>
-        <canvas id="clockPieChart" width="300" height="300"></canvas>
-        <div id="busiestHourInfo" style="text-align: center; margin-top: 10px; font-weight: bold;"></div>
+    <div class="new-stats-grid">
+        <div class="stat-card">
+            <h3>🕒 Listening Clock (Busiest Hours)</h3>
+            <canvas id="clockPieChart" width="300" height="200"></canvas>
+            <div id="busiestHourInfo" style="text-align: center; margin-top: 15px; font-weight: bold;"></div>
+        </div>
+        <div class="stat-card">
+            <h3>📅 Scrobbles by Day of Week</h3>
+            <canvas id="weekdayChart" width="300" height="200"></canvas>
+        </div>
+        <div class="stat-card">
+            <h3>⏱️ Top Artists by Listening Time (hours)</h3>
+            <ul class="stat-list" id="topArtistsTimeList"><li>Loading...</li></ul>
+        </div>
+        <div class="stat-card">
+            <h3>🏆 Longest Listening Day</h3>
+            <div id="longestDayInfo" class="highlight-text">Loading...</div>
+        </div>
+        <div class="stat-card">
+            <h3>📀 Top Playlists</h3>
+            <ul class="stat-list" id="topPlaylistsList"><li>Loading...</li></ul>
+        </div>
     </div>
 
-    <!-- Tools: only export, import, refresh -->
     <div class="tools">
         <button onclick="exportData()">⬇️ Export JSON</button>
         <label style="display:inline-flex; align-items:center; gap:6px;">📂 Import JSON
@@ -1090,156 +1035,99 @@ SCROBBLES_TEMPLATE = """
     </div>
 
     <div class="pagination" id="pagination"></div>
-    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes</footer>
+    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
 
 <script>
-    // Theme handling
     function setTheme(theme) {
-        if (theme === 'dark') {
-            document.body.classList.add('dark');
-        } else {
-            document.body.classList.remove('dark');
-        }
+        if (theme === 'dark') { document.body.classList.add('dark'); } else { document.body.classList.remove('dark'); }
         localStorage.setItem('scrobbleTheme', theme);
     }
-    function toggleTheme() {
-        const isDark = document.body.classList.contains('dark');
-        setTheme(isDark ? 'light' : 'dark');
-    }
+    function toggleTheme() { const isDark = document.body.classList.contains('dark'); setTheme(isDark ? 'light' : 'dark'); }
     const savedTheme = localStorage.getItem('scrobbleTheme');
     if (savedTheme === 'dark') document.body.classList.add('dark');
 
-    // Now playing fetch
     function fetchNowPlaying() {
-        fetch('/api/now')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('nowTrack').innerText = data.track || 'Nothing playing';
-                document.getElementById('nowArtist').innerText = data.artist || '-';
-                document.getElementById('nowAlbum').innerText = data.album || '-';
-                const artEl = document.getElementById('nowArt');
-                if (data.art && data.art !== '') {
-                    artEl.src = data.art;
-                } else {
-                    artEl.src = 'https://via.placeholder.com/80?text=🎵';
-                }
-            })
-            .catch(e => console.error('Now playing error:', e));
+        fetch('/api/now').then(r => r.json()).then(data => {
+            document.getElementById('nowTrack').innerText = data.track || 'Nothing playing';
+            document.getElementById('nowArtist').innerText = data.artist || '-';
+            document.getElementById('nowAlbum').innerText = data.album || '-';
+            const artEl = document.getElementById('nowArt');
+            artEl.src = (data.art && data.art !== '') ? data.art : 'https://via.placeholder.com/80?text=🎵';
+        }).catch(e => console.error('Now playing error:', e));
     }
 
-    // Listening time fetch
     function fetchListeningTime() {
-        fetch('/api/listening_time')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('timeToday').innerText = data.today + 'h';
-                document.getElementById('timeWeek').innerText = data.week + 'h';
-                document.getElementById('timeMonth').innerText = data.month + 'h';
-                document.getElementById('timeYear').innerText = data.year + 'h';
-            })
-            .catch(e => console.error('Listening time error:', e));
+        fetch('/api/listening_time').then(r => r.json()).then(data => {
+            document.getElementById('timeToday').innerText = data.today + 'h';
+            document.getElementById('timeWeek').innerText = data.week + 'h';
+            document.getElementById('timeMonth').innerText = data.month + 'h';
+            document.getElementById('timeYear').innerText = data.year + 'h';
+        }).catch(e => console.error('Listening time error:', e));
     }
 
-    // Stats fetch (top 25)
     function fetchStats() {
-        fetch('/api/stats')
-            .then(r => r.json())
-            .then(data => {
-                const total = data.total_scrobbles || 0;
-                document.getElementById('totalScrobbles').innerText = `Total scrobbles: ${total}`;
-
-                const artistsList = document.getElementById('topArtistsList');
-                if (data.top_artists.length === 0) {
-                    artistsList.innerHTML = '<li>No scrobbles yet</li>';
-                } else {
-                    artistsList.innerHTML = data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.playcount}</span></li>`).join('');
-                }
-
-                const albumsList = document.getElementById('topAlbumsList');
-                if (data.top_albums.length === 0) {
-                    albumsList.innerHTML = '<li>No albums yet</li>';
-                } else {
-                    albumsList.innerHTML = data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.playcount}</span></li>`).join('');
-                }
-
-                const tracksList = document.getElementById('topTracksList');
-                if (data.top_tracks.length === 0) {
-                    tracksList.innerHTML = '<li>No tracks yet</li>';
-                } else {
-                    tracksList.innerHTML = data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.playcount}</span></li>`).join('');
-                }
-            })
-            .catch(e => console.error('Stats error:', e));
+        fetch('/api/stats').then(r => r.json()).then(data => {
+            document.getElementById('totalScrobbles').innerText = `Total scrobbles: ${data.total_scrobbles}`;
+            document.getElementById('topArtistsList').innerHTML = data.top_artists.length ? data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.playcount}</span></li>`).join('') : '<li>No scrobbles yet</li>';
+            document.getElementById('topAlbumsList').innerHTML = data.top_albums.length ? data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.playcount}</span></li>`).join('') : '<li>No albums yet</li>';
+            document.getElementById('topTracksList').innerHTML = data.top_tracks.length ? data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.playcount}</span></li>`).join('') : '<li>No tracks yet</li>';
+        }).catch(e => console.error('Stats error:', e));
     }
 
-    // Listening Clock Pie Chart
     function fetchListeningClock() {
-        fetch('/api/listening_clock')
-            .then(r => r.json())
-            .then(data => {
-                const hour_counts = data.hour_counts;
-                const busiest_hour = data.busiest_hour;
-                const busiest_count = data.busiest_hour_count;
-                
-                // Prepare data for Chart.js (only hours with scrobbles)
-                const labels = [];
-                const counts = [];
-                for (let i = 0; i < hour_counts.length; i++) {
-                    if (hour_counts[i] > 0) {
-                        labels.push(`${i}:00`);
-                        counts.push(hour_counts[i]);
-                    }
-                }
-                
-                // Highlight the busiest hour slice
-                const backgroundColors = labels.map((label, idx) => {
-                    const hour = parseInt(label.split(':')[0]);
-                    return hour === busiest_hour ? '#ff6384' : '#36a2eb';
-                });
-                
-                const ctx = document.getElementById('clockPieChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'pie',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            data: counts,
-                            backgroundColor: backgroundColors,
-                            borderWidth: 1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            legend: { position: 'right' },
-                            tooltip: { callbacks: { label: (tooltipItem) => `${tooltipItem.label}: ${tooltipItem.raw} scrobbles` } }
-                        }
-                    }
-                });
-                
-                document.getElementById('busiestHourInfo').innerHTML = `🚀 Busiest hour: <strong>${busiest_hour}:00</strong> with <strong>${busiest_count}</strong> scrobbles`;
-            })
-            .catch(e => console.error('Listening clock error:', e));
+        fetch('/api/listening_clock').then(r => r.json()).then(data => {
+            const labels = [], counts = [];
+            for (let i = 0; i < data.hour_counts.length; i++) {
+                if (data.hour_counts[i] > 0) { labels.push(`${i}:00`); counts.push(data.hour_counts[i]); }
+            }
+            const backgroundColors = labels.map((label, idx) => parseInt(label.split(':')[0]) === data.busiest_hour ? '#ff6384' : '#36a2eb');
+            new Chart(document.getElementById('clockPieChart').getContext('2d'), {
+                type: 'pie', data: { labels: labels, datasets: [{ data: counts, backgroundColor: backgroundColors, borderWidth: 1 }] },
+                options: { responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (t) => `${t.label}: ${t.raw} scrobbles` } } } }
+            });
+            document.getElementById('busiestHourInfo').innerHTML = `🚀 Busiest hour: <strong>${data.busiest_hour}:00</strong> with <strong>${data.busiest_hour_count}</strong> scrobbles`;
+        }).catch(e => console.error('Listening clock error:', e));
     }
 
-    // Recent scrobbles
-    let currentOffset = 0;
-    const limit = 25;
+    function fetchWeekdayStats() {
+        fetch('/api/scrobbles_by_weekday').then(r => r.json()).then(data => {
+            const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            const orderedData = dayOrder.map(day => { const found = data.find(d => d.day === day); return found ? found.count : 0; });
+            new Chart(document.getElementById('weekdayChart').getContext('2d'), {
+                type: 'bar', data: { labels: dayOrder, datasets: [{ label: 'Scrobbles', data: orderedData, backgroundColor: '#36a2eb', borderRadius: 4 }] },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+        }).catch(e => console.error('Weekday stats error:', e));
+    }
 
+    function fetchTopArtistsByTime() {
+        fetch('/api/top_artists_by_time').then(r => r.json()).then(data => {
+            document.getElementById('topArtistsTimeList').innerHTML = data.length ? data.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.hours}h</span></li>`).join('') : '<li>No data yet</li>';
+        }).catch(e => console.error('Top artists by time error:', e));
+    }
+
+    function fetchLongestDay() {
+        fetch('/api/longest_listening_day').then(r => r.json()).then(data => {
+            document.getElementById('longestDayInfo').innerHTML = data.date ? `📅 ${data.date}<br>🎧 ${data.scrobbles} scrobbles` : 'No scrobbles yet';
+        }).catch(e => console.error('Longest day error:', e));
+    }
+
+    function fetchTopPlaylists() {
+        fetch('/api/top_playlists').then(r => r.json()).then(data => {
+            document.getElementById('topPlaylistsList').innerHTML = data.length ? data.map(p => `<li><span>${escapeHtml(p.playlist)}</span><span class="stat-count">${p.count}</span></li>`).join('') : '<li>No playlist data yet</li>';
+        }).catch(e => console.error('Top playlists error:', e));
+    }
+
+    let currentOffset = 0; const limit = 25;
     function loadScrobbles(offset) {
         const container = document.getElementById('scrobbleList');
         container.innerHTML = '<div class="empty-message">Loading...</div>';
-        fetch(`/api/scrobbles?limit=${limit}&offset=${offset}`)
-            .then(r => r.json())
-            .then(data => {
-                renderScrobbles(data.scrobbles);
-                renderPagination(data.total, offset);
-            })
-            .catch(e => {
-                console.error(e);
-                container.innerHTML = '<div class="empty-message">Error loading scrobbles.</div>';
-            });
+        fetch(`/api/scrobbles?limit=${limit}&offset=${offset}`).then(r => r.json()).then(data => {
+            if (!data.scrobbles.length) { container.innerHTML = '<div class="empty-message">✨ No scrobbles yet. Start listening!</div>'; return; }
+            container.innerHTML = data.scrobbles.map(s => `<div class="scrobble-item"><img class="album-art" src="${escapeHtml(s.art_url || 'https://via.placeholder.com/56?text=🎵')}" onerror="this.src='https://via.placeholder.com/56?text=🎵'"><div class="track-info"><div class="track-name">${escapeHtml(s.track)}</div><div class="artist-name">${escapeHtml(s.artist)}</div><div class="album-name">${escapeHtml(s.album || '')}</div></div><div class="scrobble-date">${formatRelativeTime(s.timestamp)}</div></div>`).join('');
+            renderPagination(data.total, offset);
+        }).catch(e => { console.error(e); container.innerHTML = '<div class="empty-message">Error loading scrobbles.</div>'; });
     }
 
     function formatRelativeTime(timestamp) {
@@ -1254,85 +1142,25 @@ SCROBBLES_TEMPLATE = """
         return new Date(timestamp * 1000).toLocaleDateString();
     }
 
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
-    }
-
-    function renderScrobbles(scrobbles) {
-        const container = document.getElementById('scrobbleList');
-        if (!scrobbles.length) {
-            container.innerHTML = '<div class="empty-message">✨ No scrobbles yet. Start listening!</div>';
-            return;
-        }
-        let html = '';
-        for (let s of scrobbles) {
-            const artUrl = s.art_url || 'https://via.placeholder.com/56?text=🎵';
-            const dateStr = formatRelativeTime(s.timestamp);
-            html += `
-                <div class="scrobble-item">
-                    <img class="album-art" src="${escapeHtml(artUrl)}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
-                    <div class="track-info">
-                        <div class="track-name">${escapeHtml(s.track)}</div>
-                        <div class="artist-name">${escapeHtml(s.artist)}</div>
-                        <div class="album-name">${escapeHtml(s.album || '')}</div>
-                    </div>
-                    <div class="scrobble-date">${dateStr}</div>
-                </div>
-            `;
-        }
-        container.innerHTML = html;
-    }
-
+    function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'); }
     function renderPagination(total, offset) {
         const pagDiv = document.getElementById('pagination');
-        if (total <= limit) {
-            pagDiv.innerHTML = '';
-            return;
-        }
-        const currentPage = Math.floor(offset / limit) + 1;
-        const totalPages = Math.ceil(total / limit);
-        let html = `<button onclick="changePage(-1)" ${offset === 0 ? 'disabled' : ''}>◀ Previous</button>`;
-        html += `<span>Page ${currentPage} of ${totalPages}</span>`;
-        html += `<button onclick="changePage(1)" ${offset + limit >= total ? 'disabled' : ''}>Next ▶</button>`;
-        pagDiv.innerHTML = html;
+        if (total <= limit) { pagDiv.innerHTML = ''; return; }
+        const currentPage = Math.floor(offset / limit) + 1, totalPages = Math.ceil(total / limit);
+        pagDiv.innerHTML = `<button onclick="changePage(-1)" ${offset === 0 ? 'disabled' : ''}>◀ Previous</button><span>Page ${currentPage} of ${totalPages}</span><button onclick="changePage(1)" ${offset + limit >= total ? 'disabled' : ''}>Next ▶</button>`;
     }
-
-    function changePage(delta) {
-        let newOffset = currentOffset + delta * limit;
-        if (newOffset < 0) newOffset = 0;
-        currentOffset = newOffset;
-        loadScrobbles(currentOffset);
-    }
-
+    function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
+    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchLongestDay(); fetchTopPlaylists(); }).catch(e => alert('Import failed: ' + e)); }
 
-    function importData(file) {
-        if (!file) return;
-        const formData = new FormData();
-        formData.append('file', file);
-        fetch('/import', { method: 'POST', body: formData })
-            .then(r => r.json())
-            .then(data => {
-                alert(data.status || data.error);
-                loadScrobbles(currentOffset);
-                fetchStats();
-                fetchListeningTime();
-                fetchListeningClock();  // refresh clock after import
-            })
-            .catch(e => alert('Import failed: ' + e));
-    }
-
-    // Initial loads
     fetchNowPlaying();
     fetchStats();
     fetchListeningTime();
     fetchListeningClock();
+    fetchWeekdayStats();
+    fetchTopArtistsByTime();
+    fetchLongestDay();
+    fetchTopPlaylists();
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
 </script>
@@ -1343,10 +1171,23 @@ SCROBBLES_TEMPLATE = """
 # ------------------------- MAIN -------------------------
 if __name__ == '__main__':
     init_db()
+    
+    # Initialize Last.fm (optional - won't break if not configured)
+    get_lastfm_credentials()
+    
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    print("✅ TIDAL HIFI PLAYER with Listening Clock (pie chart + busiest hour)")
-    print("📀 Scrobbles saved to scrobbles.db")
-    print("🌐 Player: http://127.0.0.1:5000")
-    print("📊 Overview (including listening clock): http://127.0.0.1:5000/scrobbles")
+    
+    print("=" * 60)
+    print("🎵 TIDAL HIFI SCROBBLER with Last.fm Integration")
+    print("=" * 60)
+    print(f"📀 Database: {DATABASE}")
+    print(f"🌐 Player UI: http://127.0.0.1:5000")
+    print(f"📊 Stats Dashboard: http://127.0.0.1:5000/scrobbles")
+    if LASTFM_USERNAME:
+        print(f"✅ Last.fM: Connected as {LASTFM_USERNAME}")
+    else:
+        print("⚠️  Last.fm: Not configured (run lastfm_creds.py store)")
+    print("=" * 60)
+    
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
