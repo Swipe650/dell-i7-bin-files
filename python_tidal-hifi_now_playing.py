@@ -611,7 +611,7 @@ def api_monthly_report():
         WHERE timestamp >= ? AND timestamp < ?
         GROUP BY artist
         ORDER BY count DESC
-        LIMIT 10
+        LIMIT 25
     """, (start_ts, end_ts))
     top_artists = [{"artist": row[0], "count": row[1]} for row in c.fetchall()]
 
@@ -621,7 +621,7 @@ def api_monthly_report():
         WHERE timestamp >= ? AND timestamp < ? AND album IS NOT NULL AND album != ''
         GROUP BY artist, album
         ORDER BY count DESC
-        LIMIT 10
+        LIMIT 25
     """, (start_ts, end_ts))
     top_albums = [{"artist": row[0], "album": row[1], "count": row[2]} for row in c.fetchall()]
 
@@ -631,7 +631,7 @@ def api_monthly_report():
         WHERE timestamp >= ? AND timestamp < ?
         GROUP BY artist, track
         ORDER BY count DESC
-        LIMIT 10
+        LIMIT 25
     """, (start_ts, end_ts))
     top_tracks = [{"artist": row[0], "track": row[1], "count": row[2]} for row in c.fetchall()]
 
