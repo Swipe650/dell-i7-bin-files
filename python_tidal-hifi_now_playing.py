@@ -827,7 +827,7 @@ SCROBBLES_TEMPLATE = """
         .stat-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
         .stat-list img { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; background: var(--art-bg); flex-shrink: 0; }
         .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .stat-count { font-weight: 600; color: var(--accent); flex-shrink: 0; }
+        .stat-count { font-weight: 600; color: var(--accent); flex-shrink: 0; margin-left: auto; }
         .stat-list::-webkit-scrollbar { width: 6px; }
         .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
         .stat-list::-webkit-scrollbar-thumb { background: #aaa; border-radius: 3px; }
