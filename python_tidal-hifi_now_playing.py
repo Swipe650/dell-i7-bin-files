@@ -9,28 +9,21 @@ import requests
 import sqlite3
 import json
 import os
-import pylast
-import keyring
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
 
 # ------------------------- CONFIGURATION -------------------------
+# Fix for KDE Plasma launcher: use absolute path based on script location
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.path.join(SCRIPT_DIR, "scrobbles.db")
+
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
-DATABASE = "scrobbles.db"
 SCROBBLE_THRESHOLD = 0.5
 MIN_SECONDS_TO_SCROBBLE = 240
-
-# Last.fm configuration
-LASTFM_SERVICE_NAME = "LastFM"
-LASTFM_API_KEY = None
-LASTFM_API_SECRET = None
-LASTFM_USERNAME = None
-LASTFM_PASSWORD = None
-LASTFM_NETWORK = None
 
 album_cache = {}
 last_cached_album = None
@@ -49,99 +42,6 @@ session = {
     "current_track_id": None, "track_start_time": 0, "track_start_timestamp": 0,
     "max_position": 0, "last_track_data": None, "lock": threading.Lock()
 }
-
-# ------------------------- LAST.FM INTEGRATION -------------------------
-def get_lastfm_credentials():
-    """Retrieve Last.fm credentials from system keyring."""
-    global LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD
-    
-    try:
-        LASTFM_USERNAME = keyring.get_password(LASTFM_SERVICE_NAME, "username")
-        LASTFM_API_KEY = keyring.get_password(LASTFM_SERVICE_NAME, "api_key")
-        LASTFM_API_SECRET = keyring.get_password(LASTFM_SERVICE_NAME, "api_secret")
-        LASTFM_PASSWORD = keyring.get_password(LASTFM_SERVICE_NAME, "password")
-        
-        if all([LASTFM_USERNAME, LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_PASSWORD]):
-            print(f"✅ Last.fm credentials loaded for user: {LASTFM_USERNAME}")
-            return True
-        else:
-            print("⚠️  Last.fm credentials not found in keyring (run lastfm_creds.py store)")
-            return False
-    except Exception as e:
-        print(f"❌ Error loading Last.fm credentials: {e}")
-        return False
-
-def get_lastfm_network():
-    """Return authenticated Last.fm network object."""
-    global LASTFM_NETWORK
-    
-    if LASTFM_NETWORK:
-        return LASTFM_NETWORK
-    
-    if not all([LASTFM_API_KEY, LASTFM_API_SECRET, LASTFM_USERNAME, LASTFM_PASSWORD]):
-        if not get_lastfm_credentials():
-            return None
-    
-    try:
-        password_hash = pylast.md5(LASTFM_PASSWORD)
-        LASTFM_NETWORK = pylast.LastFMNetwork(
-            api_key=LASTFM_API_KEY,
-            api_secret=LASTFM_API_SECRET,
-            username=LASTFM_USERNAME,
-            password_hash=password_hash
-        )
-        LASTFM_NETWORK.get_authenticated_user()
-        print(f"✅ Authenticated with Last.fm as: {LASTFM_USERNAME}")
-        return LASTFM_NETWORK
-    except Exception as e:
-        print(f"❌ Last.fm authentication failed: {e}")
-        return None
-
-def scrobble_to_lastfm(track, artist, album, timestamp, duration_sec):
-    """Send a scrobble to Last.fm."""
-    network = get_lastfm_network()
-    if not network:
-        return False
-
-    try:
-        # Use the network.scrobble method directly.
-        network.scrobble(
-            artist=artist,
-            title=track,
-            album=album,
-            timestamp=timestamp,
-            # Note: The 'duration' parameter is not supported by the scrobble method.
-        )
-        print(f"📡 Scrobbled to Last.fm: {artist} - {track}")
-        return True
-    except pylast.WSError as e:
-        if e.details == "This track is currently not available for scrobbling":
-            print(f"⚠️  Cannot scrobble {artist} - {track}: {e.details}")
-        else:
-            print(f"❌ Last.fm scrobble error: {e}")
-        return False
-    except Exception as e:
-        print(f"❌ Last.fm scrobble error: {e}")
-        return False
-
-def update_now_playing(track, artist, album, duration_sec):
-    """Update 'now playing' on Last.fm."""
-    network = get_lastfm_network()
-    if not network:
-        return False
-    
-    try:
-        network.update_now_playing(
-            artist=artist,
-            title=track,
-            album=album,
-            # duration is optional; the API may accept it but it's not required
-        )
-        print(f"📡 Updated 'now playing' on Last.fm: {artist} - {track}")
-        return True
-    except Exception as e:
-        print(f"⚠️  Could not update 'now playing' on Last.fm: {e}")
-        return False
 
 # ------------------------- DATABASE -------------------------
 def init_db():
@@ -189,9 +89,6 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
     conn.commit()
     conn.close()
     print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else ""))
-    
-    # Send to Last.fm
-    scrobble_to_lastfm(track, artist, album, timestamp, duration_sec)
 
 def get_all_scrobbles(limit=100, offset=0):
     conn = sqlite3.connect(DATABASE)
@@ -210,42 +107,59 @@ def count_scrobbles():
     conn.close()
     return count
 
-def get_top_artists(limit=25):
+def get_top_artists_with_art(limit=25):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    c.execute('''SELECT artist, COUNT(*) as playcount 
-                 FROM scrobbles 
-                 GROUP BY artist 
-                 ORDER BY playcount DESC 
-                 LIMIT ?''', (limit,))
+    c.execute("""
+        SELECT artist, COUNT(*) as playcount,
+            (SELECT art_url FROM scrobbles s2 
+             WHERE s2.artist = s1.artist AND s2.art_url IS NOT NULL AND s2.art_url != ''
+             ORDER BY s2.timestamp DESC LIMIT 1) as art_url
+        FROM scrobbles s1
+        GROUP BY artist
+        ORDER BY playcount DESC
+        LIMIT ?
+    """, (limit,))
     rows = c.fetchall()
     conn.close()
-    return [{"artist": row[0], "playcount": row[1]} for row in rows]
+    return [{"artist": row[0], "playcount": row[1], "art_url": row[2]} for row in rows]
 
-def get_top_albums(limit=25):
+def get_top_albums_with_art(limit=25):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    c.execute('''SELECT artist, album, COUNT(*) as playcount 
-                 FROM scrobbles 
-                 WHERE album IS NOT NULL AND album != ''
-                 GROUP BY artist, album 
-                 ORDER BY playcount DESC 
-                 LIMIT ?''', (limit,))
+    c.execute("""
+        SELECT artist, album, COUNT(*) as playcount,
+            (SELECT art_url FROM scrobbles s2 
+             WHERE s2.artist = s1.artist AND s2.album = s1.album 
+               AND s2.art_url IS NOT NULL AND s2.art_url != ''
+             ORDER BY s2.timestamp DESC LIMIT 1) as art_url
+        FROM scrobbles s1
+        WHERE album IS NOT NULL AND album != ''
+        GROUP BY artist, album
+        ORDER BY playcount DESC
+        LIMIT ?
+    """, (limit,))
     rows = c.fetchall()
     conn.close()
-    return [{"artist": row[0], "album": row[1], "playcount": row[2]} for row in rows]
+    return [{"artist": row[0], "album": row[1], "playcount": row[2], "art_url": row[3]} for row in rows]
 
-def get_top_tracks(limit=25):
+def get_top_tracks_with_art(limit=25):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    c.execute('''SELECT artist, track, COUNT(*) as playcount 
-                 FROM scrobbles 
-                 GROUP BY artist, track 
-                 ORDER BY playcount DESC 
-                 LIMIT ?''', (limit,))
+    c.execute("""
+        SELECT artist, track, COUNT(*) as playcount,
+            (SELECT art_url FROM scrobbles s2 
+             WHERE s2.artist = s1.artist AND s2.track = s1.track 
+               AND s2.art_url IS NOT NULL AND s2.art_url != ''
+             ORDER BY s2.timestamp DESC LIMIT 1) as art_url
+        FROM scrobbles s1
+        GROUP BY artist, track
+        ORDER BY playcount DESC
+        LIMIT ?
+    """, (limit,))
     rows = c.fetchall()
     conn.close()
-    return [{"artist": row[0], "track": row[1], "playcount": row[2]} for row in rows]
+    return [{"artist": row[0], "track": row[1], "playcount": row[2], "art_url": row[3]} for row in rows]
 
 def get_top_playlists(limit=25):
     conn = sqlite3.connect(DATABASE)
@@ -317,7 +231,7 @@ def import_scrobbles_from_json(data):
     conn.close()
     return inserted
 
-# ------------------------- PLAYERCTL & HTTP -------------------------
+# ------------------------- PLAYERCTL & HTTP (unchanged) -------------------------
 PLAYERCTL_CMD = ["playerctl", "-i", "plasma-browser-integration"]
 
 def run_playerctl(*args):
@@ -433,9 +347,7 @@ def background_poller():
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     session["last_track_data"] = None
-                
                 if track_changed or not session["last_track_data"]:
-                    # Store track start timestamp for Last.fm
                     track_start_timestamp = int(time.time())
                     session["track_start_timestamp"] = track_start_timestamp
                     session["last_track_data"] = {
@@ -450,15 +362,9 @@ def background_poller():
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     last_title = title
-                    
-                    # Update "now playing" on Last.fm
-                    if track_changed:
-                        update_now_playing(title, meta["artist"], meta["album"], meta["duration_sec"])
-                
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
-            
             current_track_data["track"] = title
             current_track_data["artist"] = meta["artist"]
             current_track_data["album"] = meta["album"]
@@ -473,9 +379,7 @@ def background_poller():
             secs = int(pos % 60)
             current_track_data["current"] = f"{mins}:{secs:02d}"
             current_track_data["progress"] = round(progress, 1)
-        
         fetch_http_details()
-        
         with session["lock"]:
             if session["last_track_data"]:
                 session["last_track_data"]["art_url"] = current_track_data.get("art", session["last_track_data"]["art_url"])
@@ -483,7 +387,6 @@ def background_poller():
                 session["last_track_data"]["bit_depth"] = current_track_data.get("bitDepth", session["last_track_data"]["bit_depth"])
                 session["last_track_data"]["sample_rate"] = current_track_data.get("sampleRate", session["last_track_data"]["sample_rate"])
                 session["last_track_data"]["codec"] = current_track_data.get("codec", session["last_track_data"]["codec"])
-        
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
 
@@ -518,9 +421,9 @@ def api_now():
 
 @app.route('/api/stats')
 def api_stats():
-    top_artists = get_top_artists(25)
-    top_albums = get_top_albums(25)
-    top_tracks = get_top_tracks(25)
+    top_artists = get_top_artists_with_art(25)
+    top_albums = get_top_albums_with_art(25)
+    top_tracks = get_top_tracks_with_art(25)
     total_scrobbles = count_scrobbles()
     return jsonify({
         "top_artists": top_artists,
@@ -699,7 +602,7 @@ def view_cache():
     html += "</ul><p><a href='/'>Back</a></p>"
     return html
 
-# ------------------------- HTML TEMPLATES (same as before) -------------------------
+# ------------------------- MAIN PLAYER PAGE (unchanged) -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -849,6 +752,7 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
 </html>
 """
 
+# ------------------------- SCROBBLES OVERVIEW PAGE (with art icons) -------------------------
 SCROBBLES_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -896,7 +800,14 @@ SCROBBLES_TEMPLATE = """
             --art-bg: #2c2c2c;
         }
         * { box-sizing: border-box; }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: var(--bg-body); margin: 0; padding: 0; color: var(--text-primary); transition: background 0.2s, color 0.2s; }
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: var(--bg-body);
+            margin: 0;
+            padding: 0;
+            color: var(--text-primary);
+            transition: background 0.2s, color 0.2s;
+        }
         .container { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }
         .header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; margin-bottom: 2rem; border-bottom: 1px solid var(--border-light); padding-bottom: 1rem; }
         h1 { font-size: 1.8rem; font-weight: 500; margin: 0; color: var(--accent); letter-spacing: -0.5px; }
@@ -913,8 +824,9 @@ SCROBBLES_TEMPLATE = """
         .stat-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; box-shadow: 0 1px 4px var(--shadow); border: 1px solid var(--border-card); }
         .stat-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; font-weight: 500; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
         .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; padding-right: 5px; }
-        .stat-list li { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-card); font-size: 0.9rem; }
-        .stat-list li span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
+        .stat-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
+        .stat-list img { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; background: var(--art-bg); flex-shrink: 0; }
+        .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .stat-count { font-weight: 600; color: var(--accent); flex-shrink: 0; }
         .stat-list::-webkit-scrollbar { width: 6px; }
         .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
@@ -982,9 +894,9 @@ SCROBBLES_TEMPLATE = """
     </div>
 
     <div class="stats-grid" id="statsGrid">
-        <div class="stat-card"><h3>Top Artists (by playcount)</h3><ul class="stat-list" id="topArtistsList"><li>Loading...</li></ul></div>
-        <div class="stat-card"><h3>Top Albums</h3><ul class="stat-list" id="topAlbumsList"><li>Loading...</li></ul></div>
-        <div class="stat-card"><h3>Top Tracks</h3><ul class="stat-list" id="topTracksList"><li>Loading...</li></ul></div>
+        <div class="stat-card"><h3>🎤 Top Artists</h3><ul class="stat-list" id="topArtistsList"><li>Loading...</li></ul></div>
+        <div class="stat-card"><h3>💿 Top Albums</h3><ul class="stat-list" id="topAlbumsList"><li>Loading...</li></ul></div>
+        <div class="stat-card"><h3>🎵 Top Tracks</h3><ul class="stat-list" id="topTracksList"><li>Loading...</li></ul></div>
     </div>
 
     <div class="time-card">
@@ -1035,7 +947,7 @@ SCROBBLES_TEMPLATE = """
     </div>
 
     <div class="pagination" id="pagination"></div>
-    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
+    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes</footer>
 </div>
 
 <script>
@@ -1069,9 +981,33 @@ SCROBBLES_TEMPLATE = """
     function fetchStats() {
         fetch('/api/stats').then(r => r.json()).then(data => {
             document.getElementById('totalScrobbles').innerText = `Total scrobbles: ${data.total_scrobbles}`;
-            document.getElementById('topArtistsList').innerHTML = data.top_artists.length ? data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.playcount}</span></li>`).join('') : '<li>No scrobbles yet</li>';
-            document.getElementById('topAlbumsList').innerHTML = data.top_albums.length ? data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.playcount}</span></li>`).join('') : '<li>No albums yet</li>';
-            document.getElementById('topTracksList').innerHTML = data.top_tracks.length ? data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.playcount}</span></li>`).join('') : '<li>No tracks yet</li>';
+            
+            const artistsList = document.getElementById('topArtistsList');
+            artistsList.innerHTML = data.top_artists.length ? data.top_artists.map(a => `
+                <li>
+                    <img src="${escapeHtml(a.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
+                    <span>${escapeHtml(a.artist)}</span>
+                    <span class="stat-count">${a.playcount}</span>
+                </li>
+            `).join('') : '<li>No scrobbles yet</li>';
+            
+            const albumsList = document.getElementById('topAlbumsList');
+            albumsList.innerHTML = data.top_albums.length ? data.top_albums.map(a => `
+                <li>
+                    <img src="${escapeHtml(a.art_url || 'https://via.placeholder.com/28?text=🎵')}" onerror="this.src='https://via.placeholder.com/28?text=🎵'">
+                    <span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span>
+                    <span class="stat-count">${a.playcount}</span>
+                </li>
+            `).join('') : '<li>No albums yet</li>';
+            
+            const tracksList = document.getElementById('topTracksList');
+            tracksList.innerHTML = data.top_tracks.length ? data.top_tracks.map(t => `
+                <li>
+                    <img src="${escapeHtml(t.art_url || 'https://via.placeholder.com/28?text=🎵')}" onerror="this.src='https://via.placeholder.com/28?text=🎵'">
+                    <span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span>
+                    <span class="stat-count">${t.playcount}</span>
+                </li>
+            `).join('') : '<li>No tracks yet</li>';
         }).catch(e => console.error('Stats error:', e));
     }
 
@@ -1103,7 +1039,8 @@ SCROBBLES_TEMPLATE = """
 
     function fetchTopArtistsByTime() {
         fetch('/api/top_artists_by_time').then(r => r.json()).then(data => {
-            document.getElementById('topArtistsTimeList').innerHTML = data.length ? data.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.hours}h</span></li>`).join('') : '<li>No data yet</li>';
+            const container = document.getElementById('topArtistsTimeList');
+            container.innerHTML = data.length ? data.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.hours}h</span></li>`).join('') : '<li>No data yet</li>';
         }).catch(e => console.error('Top artists by time error:', e));
     }
 
@@ -1115,7 +1052,8 @@ SCROBBLES_TEMPLATE = """
 
     function fetchTopPlaylists() {
         fetch('/api/top_playlists').then(r => r.json()).then(data => {
-            document.getElementById('topPlaylistsList').innerHTML = data.length ? data.map(p => `<li><span>${escapeHtml(p.playlist)}</span><span class="stat-count">${p.count}</span></li>`).join('') : '<li>No playlist data yet</li>';
+            const container = document.getElementById('topPlaylistsList');
+            container.innerHTML = data.length ? data.map(p => `<li><span>${escapeHtml(p.playlist)}</span><span class="stat-count">${p.count}</span></li>`).join('') : '<li>No playlist data yet</li>';
         }).catch(e => console.error('Top playlists error:', e));
     }
 
@@ -1125,7 +1063,17 @@ SCROBBLES_TEMPLATE = """
         container.innerHTML = '<div class="empty-message">Loading...</div>';
         fetch(`/api/scrobbles?limit=${limit}&offset=${offset}`).then(r => r.json()).then(data => {
             if (!data.scrobbles.length) { container.innerHTML = '<div class="empty-message">✨ No scrobbles yet. Start listening!</div>'; return; }
-            container.innerHTML = data.scrobbles.map(s => `<div class="scrobble-item"><img class="album-art" src="${escapeHtml(s.art_url || 'https://via.placeholder.com/56?text=🎵')}" onerror="this.src='https://via.placeholder.com/56?text=🎵'"><div class="track-info"><div class="track-name">${escapeHtml(s.track)}</div><div class="artist-name">${escapeHtml(s.artist)}</div><div class="album-name">${escapeHtml(s.album || '')}</div></div><div class="scrobble-date">${formatRelativeTime(s.timestamp)}</div></div>`).join('');
+            container.innerHTML = data.scrobbles.map(s => `
+                <div class="scrobble-item">
+                    <img class="album-art" src="${escapeHtml(s.art_url || 'https://via.placeholder.com/56?text=🎵')}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
+                    <div class="track-info">
+                        <div class="track-name">${escapeHtml(s.track)}</div>
+                        <div class="artist-name">${escapeHtml(s.artist)}</div>
+                        <div class="album-name">${escapeHtml(s.album || '')}</div>
+                    </div>
+                    <div class="scrobble-date">${formatRelativeTime(s.timestamp)}</div>
+                </div>
+            `).join('');
             renderPagination(data.total, offset);
         }).catch(e => { console.error(e); container.innerHTML = '<div class="empty-message">Error loading scrobbles.</div>'; });
     }
@@ -1171,23 +1119,9 @@ SCROBBLES_TEMPLATE = """
 # ------------------------- MAIN -------------------------
 if __name__ == '__main__':
     init_db()
-    
-    # Initialize Last.fm (optional - won't break if not configured)
-    get_lastfm_credentials()
-    
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    
-    print("=" * 60)
-    print("🎵 TIDAL HIFI SCROBBLER with Last.fm Integration")
-    print("=" * 60)
-    print(f"📀 Database: {DATABASE}")
-    print(f"🌐 Player UI: http://127.0.0.1:5000")
-    print(f"📊 Stats Dashboard: http://127.0.0.1:5000/scrobbles")
-    if LASTFM_USERNAME:
-        print(f"✅ Last.fM: Connected as {LASTFM_USERNAME}")
-    else:
-        print("⚠️  Last.fm: Not configured (run lastfm_creds.py store)")
-    print("=" * 60)
-    
+    print(f"✅ TIDAL HIFI PLAYER (full featured, database: {DATABASE})")
+    print("🌐 Player: http://127.0.0.1:5000")
+    print("📊 Overview (with art icons): http://127.0.0.1:5000/scrobbles")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
