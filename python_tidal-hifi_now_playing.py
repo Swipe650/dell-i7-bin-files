@@ -9,13 +9,14 @@ import requests
 import sqlite3
 import json
 import os
+import pylast
+import keyring
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
 
 # ------------------------- CONFIGURATION -------------------------
-# Fix for KDE Plasma launcher: use absolute path based on script location
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(SCRIPT_DIR, "scrobbles.db")
 
@@ -24,6 +25,8 @@ CURRENT_URL = f"{BASE_URL}/current"
 POLL_INTERVAL = 1
 SCROBBLE_THRESHOLD = 0.5
 MIN_SECONDS_TO_SCROBBLE = 240
+
+LASTFM_SERVICE = "LastFM"
 
 album_cache = {}
 last_cached_album = None
@@ -42,6 +45,56 @@ session = {
     "current_track_id": None, "track_start_time": 0, "track_start_timestamp": 0,
     "max_position": 0, "last_track_data": None, "lock": threading.Lock()
 }
+
+# ------------------------- LAST.FM INTEGRATION -------------------------
+def get_lastfm_credentials():
+    try:
+        username = keyring.get_password(LASTFM_SERVICE, "username")
+        api_key = keyring.get_password(LASTFM_SERVICE, "api_key")
+        api_secret = keyring.get_password(LASTFM_SERVICE, "api_secret")
+        password = keyring.get_password(LASTFM_SERVICE, "password")
+        if all([username, api_key, api_secret, password]):
+            return username, api_key, api_secret, password
+    except Exception as e:
+        print(f"Keyring error: {e}")
+    return None, None, None, None
+
+def get_lastfm_network():
+    username, api_key, api_secret, password = get_lastfm_credentials()
+    if not all([username, api_key, api_secret, password]):
+        return None
+    try:
+        password_hash = pylast.md5(password)
+        network = pylast.LastFMNetwork(
+            api_key=api_key,
+            api_secret=api_secret,
+            username=username,
+            password_hash=password_hash
+        )
+        network.get_authenticated_user()
+        print(f"✅ Authenticated with Last.fm as: {username}")
+        return network
+    except Exception as e:
+        print(f"❌ Last.fm auth error: {e}")
+        return None
+
+def update_now_playing(network, artist, title, album):
+    if not network:
+        return
+    try:
+        network.update_now_playing(artist=artist, title=title, album=album)
+        print(f"📡 Now playing on Last.fm: {artist} - {title}")
+    except Exception as e:
+        print(f"⚠️ Now playing error: {e}")
+
+def scrobble_to_lastfm(network, artist, title, album, timestamp):
+    if not network:
+        return
+    try:
+        network.scrobble(artist=artist, title=title, album=album, timestamp=timestamp)
+        print(f"📀 Scrobbled to Last.fm: {artist} - {title}")
+    except Exception as e:
+        print(f"❌ Scrobble error: {e}")
 
 # ------------------------- DATABASE -------------------------
 def init_db():
@@ -89,6 +142,10 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
     conn.commit()
     conn.close()
     print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else ""))
+    # Send to Last.fm
+    network = get_lastfm_network()
+    if network:
+        scrobble_to_lastfm(network, artist, track, album, timestamp)
 
 def get_all_scrobbles(limit=100, offset=0):
     conn = sqlite3.connect(DATABASE)
@@ -231,7 +288,7 @@ def import_scrobbles_from_json(data):
     conn.close()
     return inserted
 
-# ------------------------- PLAYERCTL & HTTP (unchanged) -------------------------
+# ------------------------- PLAYERCTL & TIDAL API -------------------------
 PLAYERCTL_CMD = ["playerctl", "-i", "plasma-browser-integration"]
 
 def run_playerctl(*args):
@@ -330,6 +387,7 @@ def maybe_scrobble(previous_track_data, max_position, duration):
 def background_poller():
     global current_track_data
     last_title = None
+    network = get_lastfm_network()
     while True:
         meta = get_playerctl_metadata()
         if meta:
@@ -362,6 +420,8 @@ def background_poller():
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     last_title = title
+                    if network:
+                        update_now_playing(network, meta["artist"], title, meta["album"])
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
@@ -398,6 +458,10 @@ def index():
 @app.route('/scrobbles')
 def scrobbles_page():
     return render_template_string(SCROBBLES_TEMPLATE)
+
+@app.route('/monthly')
+def monthly_page():
+    return render_template_string(MONTHLY_TEMPLATE)
 
 @app.route('/api/scrobbles')
 def api_scrobbles():
@@ -516,6 +580,85 @@ def api_top_playlists():
     top = get_top_playlists(25)
     return jsonify(top)
 
+@app.route('/api/monthly_report')
+def api_monthly_report():
+    year = request.args.get('year', type=int)
+    month = request.args.get('month', type=int)
+    if not year or not month:
+        return jsonify({"error": "Missing year or month"}), 400
+
+    start_date = datetime(year, month, 1)
+    if month == 12:
+        end_date = datetime(year + 1, 1, 1)
+    else:
+        end_date = datetime(year, month + 1, 1)
+    start_ts = int(start_date.timestamp())
+    end_ts = int(end_date.timestamp())
+
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ? AND timestamp < ?", (start_ts, end_ts))
+    total_scrobbles = c.fetchone()[0]
+
+    c.execute("SELECT SUM(duration_sec) FROM scrobbles WHERE timestamp >= ? AND timestamp < ? AND duration_sec > 0", (start_ts, end_ts))
+    total_sec = c.fetchone()[0] or 0
+    total_hours = round(total_sec / 3600, 1)
+
+    c.execute("""
+        SELECT artist, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY artist
+        ORDER BY count DESC
+        LIMIT 10
+    """, (start_ts, end_ts))
+    top_artists = [{"artist": row[0], "count": row[1]} for row in c.fetchall()]
+
+    c.execute("""
+        SELECT artist, album, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ? AND album IS NOT NULL AND album != ''
+        GROUP BY artist, album
+        ORDER BY count DESC
+        LIMIT 10
+    """, (start_ts, end_ts))
+    top_albums = [{"artist": row[0], "album": row[1], "count": row[2]} for row in c.fetchall()]
+
+    c.execute("""
+        SELECT artist, track, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY artist, track
+        ORDER BY count DESC
+        LIMIT 10
+    """, (start_ts, end_ts))
+    top_tracks = [{"artist": row[0], "track": row[1], "count": row[2]} for row in c.fetchall()]
+
+    c.execute("""
+        SELECT strftime('%H', datetime(timestamp, 'unixepoch')) as hour, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY hour
+        ORDER BY hour
+    """, (start_ts, end_ts))
+    rows = c.fetchall()
+    hour_counts = [0] * 24
+    for row in rows:
+        hour_counts[int(row[0])] = row[1]
+    conn.close()
+
+    return jsonify({
+        "year": year,
+        "month": month,
+        "total_scrobbles": total_scrobbles,
+        "total_hours": total_hours,
+        "top_artists": top_artists,
+        "top_albums": top_albums,
+        "top_tracks": top_tracks,
+        "hour_counts": hour_counts
+    })
+
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
     with session["lock"]:
@@ -602,94 +745,7 @@ def view_cache():
     html += "</ul><p><a href='/'>Back</a></p>"
     return html
 
-@app.route('/api/monthly_report')
-def api_monthly_report():
-    year = request.args.get('year', type=int)
-    month = request.args.get('month', type=int)
-    if not year or not month:
-        return jsonify({"error": "Missing year or month"}), 400
-
-    # Calculate start and end timestamps for the month
-    start_date = datetime(year, month, 1)
-    if month == 12:
-        end_date = datetime(year + 1, 1, 1)
-    else:
-        end_date = datetime(year, month + 1, 1)
-    start_ts = int(start_date.timestamp())
-    end_ts = int(end_date.timestamp())
-
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-
-    # Total scrobbles
-    c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ? AND timestamp < ?", (start_ts, end_ts))
-    total_scrobbles = c.fetchone()[0]
-
-    # Total listening hours
-    c.execute("SELECT SUM(duration_sec) FROM scrobbles WHERE timestamp >= ? AND timestamp < ? AND duration_sec > 0", (start_ts, end_ts))
-    total_sec = c.fetchone()[0] or 0
-    total_hours = round(total_sec / 3600, 1)
-
-    # Top artists (by play count)
-    c.execute("""
-        SELECT artist, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY artist
-        ORDER BY count DESC
-        LIMIT 10
-    """, (start_ts, end_ts))
-    top_artists = [{"artist": row[0], "count": row[1]} for row in c.fetchall()]
-
-    # Top albums (by play count)
-    c.execute("""
-        SELECT artist, album, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ? AND album IS NOT NULL AND album != ''
-        GROUP BY artist, album
-        ORDER BY count DESC
-        LIMIT 10
-    """, (start_ts, end_ts))
-    top_albums = [{"artist": row[0], "album": row[1], "count": row[2]} for row in c.fetchall()]
-
-    # Top tracks (by play count)
-    c.execute("""
-        SELECT artist, track, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY artist, track
-        ORDER BY count DESC
-        LIMIT 10
-    """, (start_ts, end_ts))
-    top_tracks = [{"artist": row[0], "track": row[1], "count": row[2]} for row in c.fetchall()]
-
-    # Listening clock for the month (hour distribution)
-    c.execute("""
-        SELECT strftime('%H', datetime(timestamp, 'unixepoch')) as hour, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY hour
-        ORDER BY hour
-    """, (start_ts, end_ts))
-    rows = c.fetchall()
-    hour_counts = [0] * 24
-    for row in rows:
-        hour_counts[int(row[0])] = row[1]
-
-    conn.close()
-
-    return jsonify({
-        "year": year,
-        "month": month,
-        "total_scrobbles": total_scrobbles,
-        "total_hours": total_hours,
-        "top_artists": top_artists,
-        "top_albums": top_albums,
-        "top_tracks": top_tracks,
-        "hour_counts": hour_counts
-    })
-
-# ------------------------- MAIN PLAYER PAGE (unchanged) -------------------------
+# ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -839,7 +895,6 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
 </html>
 """
 
-# ------------------------- SCROBBLES OVERVIEW PAGE (with art icons) -------------------------
 SCROBBLES_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -901,6 +956,8 @@ SCROBBLES_TEMPLATE = """
         .sub { color: var(--text-muted); font-size: 0.85rem; }
         .player-link { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.4rem 1rem; border-radius: 20px; text-decoration: none; color: var(--accent); font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
         .player-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
+        .report-link { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.4rem 1rem; border-radius: 20px; text-decoration: none; color: var(--accent); font-size: 0.85rem; font-weight: 500; transition: all 0.2s; margin-left: 10px; }
+        .report-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .now-playing { background: var(--bg-card); border-radius: 16px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1.5rem; align-items: center; box-shadow: 0 2px 8px var(--shadow); border: 1px solid var(--border-card); }
         .now-art { width: 80px; height: 80px; border-radius: 12px; object-fit: cover; background: var(--art-bg); }
         .now-info { flex: 1; }
@@ -967,6 +1024,7 @@ SCROBBLES_TEMPLATE = """
         <div style="display: flex; gap: 10px;">
             <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()">🌓 Dark/Light</button>
             <a href="/" class="player-link">◀ Now Playing (full)</a>
+            <a href="/monthly" class="report-link" target="_blank">📅 Monthly Reports</a>
         </div>
     </div>
 
@@ -1028,122 +1086,16 @@ SCROBBLES_TEMPLATE = """
         <button onclick="location.reload()">🔄 Refresh</button>
     </div>
 
-    <!-- Monthly Report Section -->
-    <div class="stat-card" style="margin-bottom: 1.5rem;">
-        <h3>📅 Monthly Listening Report</h3>
-        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
-            <input type="month" id="reportMonth" value="2025-05" style="padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
-            <button onclick="loadMonthlyReport()" class="theme-toggle" style="background: var(--accent); color: white;">Generate Report</button>
-        </div>
-        <div id="monthlyReportContent" style="display: none;">
-            <div style="display: flex; justify-content: space-around; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
-                <div><strong>Total Scrobbles:</strong> <span id="reportTotalScrobbles">-</span></div>
-                <div><strong>Total Listening Time:</strong> <span id="reportTotalHours">-</span> hours</div>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem;">
-                <div>
-                    <h4>🎤 Top Artists</h4>
-                    <ul class="stat-list" id="reportTopArtists" style="max-height: 200px;"></ul>
-                </div>
-                <div>
-                    <h4>💿 Top Albums</h4>
-                    <ul class="stat-list" id="reportTopAlbums" style="max-height: 200px;"></ul>
-                </div>
-                <div>
-                    <h4>🎵 Top Tracks</h4>
-                    <ul class="stat-list" id="reportTopTracks" style="max-height: 200px;"></ul>
-                </div>
-                <div>
-                    <h4>🕒 Listening Clock</h4>
-                    <canvas id="reportClockChart" width="250" height="150"></canvas>
-                </div>
-            </div>
-        </div>
-        <div id="reportNoData" style="display: none; text-align: center; padding: 1rem;">Select a month and click Generate Report.</div>
-    </div>
-
     <h3 style="margin: 1rem 0 0.5rem 0;">Recent Scrobbles</h3>
     <div id="scrobbleList" class="scrobble-list">
         <div class="empty-message">Loading your scrobbles...</div>
     </div>
 
     <div class="pagination" id="pagination"></div>
-    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes</footer>
+    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
 
 <script>
-    function loadMonthlyReport() {
-        const monthInput = document.getElementById('reportMonth').value;
-        if (!monthInput) return;
-        const [year, month] = monthInput.split('-');
-        const contentDiv = document.getElementById('monthlyReportContent');
-        const noDataDiv = document.getElementById('reportNoData');
-        
-        contentDiv.style.display = 'none';
-        noDataDiv.style.display = 'block';
-        noDataDiv.innerHTML = 'Loading...';
-        
-        fetch(`/api/monthly_report?year=${year}&month=${month}`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.error) {
-                    noDataDiv.innerHTML = `Error: ${data.error}`;
-                    return;
-                }
-                
-                document.getElementById('reportTotalScrobbles').innerText = data.total_scrobbles;
-                document.getElementById('reportTotalHours').innerText = data.total_hours;
-                
-                // Top Artists
-                const artistsHtml = data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.count}</span></li>`).join('');
-                document.getElementById('reportTopArtists').innerHTML = artistsHtml || '<li>No scrobbles</li>';
-                
-                // Top Albums
-                const albumsHtml = data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.count}</span></li>`).join('');
-                document.getElementById('reportTopAlbums').innerHTML = albumsHtml || '<li>No albums</li>';
-                
-                // Top Tracks
-                const tracksHtml = data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.count}</span></li>`).join('');
-                document.getElementById('reportTopTracks').innerHTML = tracksHtml || '<li>No tracks</li>';
-                
-                // Listening clock (bar chart)
-                const ctx = document.getElementById('reportClockChart').getContext('2d');
-                if (window.reportClockChartInstance) window.reportClockChartInstance.destroy();
-                window.reportClockChartInstance = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: Array.from({length: 24}, (_, i) => `${i}:00`),
-                        datasets: [{
-                            label: 'Scrobbles',
-                            data: data.hour_counts,
-                            backgroundColor: '#36a2eb',
-                            borderRadius: 4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        scales: { y: { beginAtZero: true } }
-                    }
-                });
-                
-                contentDiv.style.display = 'block';
-                noDataDiv.style.display = 'none';
-            })
-            .catch(e => {
-                console.error(e);
-                noDataDiv.innerHTML = 'Error loading report';
-            });
-    }
-
-    // Also add this to your initial page load to run after the DOM is ready
-    document.addEventListener('DOMContentLoaded', function() {
-        const monthInput = document.getElementById('reportMonth');
-        const now = new Date();
-        monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        loadMonthlyReport(); // load current month by default
-    });
-
     function setTheme(theme) {
         if (theme === 'dark') { document.body.classList.add('dark'); } else { document.body.classList.remove('dark'); }
         localStorage.setItem('scrobbleTheme', theme);
@@ -1187,7 +1139,7 @@ SCROBBLES_TEMPLATE = """
             const albumsList = document.getElementById('topAlbumsList');
             albumsList.innerHTML = data.top_albums.length ? data.top_albums.map(a => `
                 <li>
-                    <img src="${escapeHtml(a.art_url || 'https://via.placeholder.com/28?text=🎵')}" onerror="this.src='https://via.placeholder.com/28?text=🎵'">
+                    <img src="${escapeHtml(a.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
                     <span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span>
                     <span class="stat-count">${a.playcount}</span>
                 </li>
@@ -1196,7 +1148,7 @@ SCROBBLES_TEMPLATE = """
             const tracksList = document.getElementById('topTracksList');
             tracksList.innerHTML = data.top_tracks.length ? data.top_tracks.map(t => `
                 <li>
-                    <img src="${escapeHtml(t.art_url || 'https://via.placeholder.com/28?text=🎵')}" onerror="this.src='https://via.placeholder.com/28?text=🎵'">
+                    <img src="${escapeHtml(t.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
                     <span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span>
                     <span class="stat-count">${t.playcount}</span>
                 </li>
@@ -1309,12 +1261,200 @@ SCROBBLES_TEMPLATE = """
 </html>
 """
 
+MONTHLY_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Monthly Listening Report · TIDAL</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='grad' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23e0e0e0'/%3E%3Cstop offset='70%25' stop-color='%23a0a0a0'/%3E%3Cstop offset='100%25' stop-color='%23404040'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23grad)' stroke='%23333' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23333'/%3E%3C/svg%3E">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-body: #f9f9f9;
+            --bg-card: #ffffff;
+            --bg-tools: #ffffff;
+            --text-primary: #222;
+            --text-secondary: #666;
+            --text-muted: #999;
+            --border-light: #e5e5e5;
+            --border-card: #eee;
+            --accent: #d51007;
+            --accent-hover: #b00;
+            --button-bg: #f5f5f5;
+            --button-border: #ddd;
+            --button-hover: #e9e9e9;
+            --shadow: rgba(0,0,0,0.05);
+        }
+        body.dark {
+            --bg-body: #121212;
+            --bg-card: #1e1e1e;
+            --bg-tools: #1e1e1e;
+            --text-primary: #eee;
+            --text-secondary: #bbb;
+            --text-muted: #888;
+            --border-light: #2c2c2c;
+            --border-card: #2c2c2c;
+            --accent: #ff6b6b;
+            --accent-hover: #ff8a8a;
+            --button-bg: #2c2c2c;
+            --button-border: #444;
+            --button-hover: #3a3a3a;
+            --shadow: rgba(0,0,0,0.3);
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: var(--bg-body);
+            margin: 0;
+            padding: 0;
+            color: var(--text-primary);
+            transition: background 0.2s, color 0.2s;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 2rem 1rem; }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border-light);
+            padding-bottom: 1rem;
+        }
+        h1 { font-size: 1.8rem; font-weight: 500; margin: 0; color: var(--accent); letter-spacing: -0.5px; }
+        .sub { color: var(--text-muted); font-size: 0.85rem; }
+        .back-link { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.4rem 1rem; border-radius: 20px; text-decoration: none; color: var(--accent); font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
+        .back-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
+        .controls { margin-bottom: 1.5rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        input { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary); }
+        button { background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white; font-weight: bold; }
+        .report-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 2rem; }
+        .stat-badge { text-align: center; background: var(--bg-card); padding: 1rem; border-radius: 16px; min-width: 150px; box-shadow: 0 1px 4px var(--shadow); }
+        .stat-badge .label { font-size: 0.8rem; color: var(--text-muted); }
+        .stat-badge .value { font-size: 2rem; font-weight: 600; color: var(--accent); }
+        .tables-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .table-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; border: 1px solid var(--border-card); }
+        .table-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
+        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; }
+        .stat-list li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
+        .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
+        .stat-count { font-weight: 600; color: var(--accent); }
+        canvas { max-height: 300px; margin-top: 1rem; }
+        footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div>
+            <h1>📅 Monthly Listening Report</h1>
+            <div class="sub">detailed breakdown for any month</div>
+        </div>
+        <a href="/scrobbles" class="back-link">◀ Back to Overview</a>
+    </div>
+
+    <div class="controls">
+        <input type="month" id="monthPicker" value="2025-05">
+        <button id="loadReportBtn">Generate Report</button>
+    </div>
+
+    <div id="reportContent" style="display: none;">
+        <div class="report-stats">
+            <div class="stat-badge"><div class="label">Total Scrobbles</div><div class="value" id="totalScrobbles">-</div></div>
+            <div class="stat-badge"><div class="label">Listening Time</div><div class="value" id="totalHours">-</div><div class="label">hours</div></div>
+        </div>
+
+        <div class="tables-grid">
+            <div class="table-card"><h3>🎤 Top Artists</h3><ul class="stat-list" id="topArtists"></ul></div>
+            <div class="table-card"><h3>💿 Top Albums</h3><ul class="stat-list" id="topAlbums"></ul></div>
+            <div class="table-card"><h3>🎵 Top Tracks</h3><ul class="stat-list" id="topTracks"></ul></div>
+        </div>
+
+        <div class="table-card">
+            <h3>🕒 Listening Clock (Hourly Distribution)</h3>
+            <canvas id="clockChart" width="100%" height="250"></canvas>
+        </div>
+    </div>
+    <div id="loadingMsg" style="text-align: center; padding: 2rem;">Select a month and click Generate Report.</div>
+</div>
+
+<script>
+    function loadReport() {
+        const monthInput = document.getElementById('monthPicker').value;
+        if (!monthInput) return;
+        const [year, month] = monthInput.split('-');
+        const contentDiv = document.getElementById('reportContent');
+        const loadingMsg = document.getElementById('loadingMsg');
+        loadingMsg.style.display = 'block';
+        loadingMsg.innerText = 'Loading report...';
+        contentDiv.style.display = 'none';
+
+        fetch(`/api/monthly_report?year=${year}&month=${month}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    loadingMsg.innerText = `Error: ${data.error}`;
+                    return;
+                }
+                document.getElementById('totalScrobbles').innerText = data.total_scrobbles;
+                document.getElementById('totalHours').innerText = data.total_hours;
+
+                document.getElementById('topArtists').innerHTML = data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.count}</span></li>`).join('') || '<li>No data</li>';
+                document.getElementById('topAlbums').innerHTML = data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.count}</span></li>`).join('') || '<li>No data</li>';
+                document.getElementById('topTracks').innerHTML = data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.count}</span></li>`).join('') || '<li>No data</li>';
+
+                const ctx = document.getElementById('clockChart').getContext('2d');
+                if (window.clockChart) window.clockChart.destroy();
+                window.clockChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+                        datasets: [{
+                            label: 'Scrobbles',
+                            data: data.hour_counts,
+                            backgroundColor: '#36a2eb',
+                            borderRadius: 4
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: true, scales: { y: { beginAtZero: true } } }
+                });
+
+                loadingMsg.style.display = 'none';
+                contentDiv.style.display = 'block';
+            })
+            .catch(e => {
+                console.error(e);
+                loadingMsg.innerText = 'Error loading report. See console.';
+            });
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
+    }
+
+    // Set current month as default
+    const now = new Date();
+    document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    document.getElementById('loadReportBtn').addEventListener('click', loadReport);
+    loadReport(); // load current month on page load
+
+    // Theme sync (optional: copy from localStorage)
+    if (localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
+</script>
+</body>
+</html>
+"""
+
 # ------------------------- MAIN -------------------------
 if __name__ == '__main__':
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    print(f"✅ TIDAL HIFI PLAYER (full featured, database: {DATABASE})")
+    print(f"✅ TIDAL HIFI FULL SCROBBLER (Last.fm + Monthly Reports in new page)")
+    print(f"📀 Database: {DATABASE}")
     print("🌐 Player: http://127.0.0.1:5000")
-    print("📊 Overview (with art icons): http://127.0.0.1:5000/scrobbles")
+    print("📊 Overview: http://127.0.0.1:5000/scrobbles")
+    print("📅 Monthly Reports: http://127.0.0.1:5000/monthly")
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
