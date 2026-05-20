@@ -48,6 +48,9 @@ session = {
     "max_position": 0, "last_track_data": None, "lock": threading.Lock()
 }
 
+# Playlists to ignore (do not store playlist name, treat as album)
+IGNORED_PLAYLISTS = {"Top Tracks", "Mix"}  # add any others you want to ignore
+
 # ------------------------- LAST.FM INTEGRATION -------------------------
 def get_lastfm_credentials():
     try:
@@ -464,7 +467,9 @@ def background_poller():
                         ld = session["last_track_data"]
                         playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
                         album_name = current_track_data.get("album", "")
-                        playlist_name = playing_from if playing_from != album_name else None
+                        playlist_name = None
+                        if playing_from != album_name and playing_from not in IGNORED_PLAYLISTS:
+                            playlist_name = playing_from
                         add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
                                      ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
                     session["track_start_time"] = time.time()
@@ -763,7 +768,9 @@ def scrobble_now():
             ld = session["last_track_data"]
             playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
             album_name = current_track_data.get("album", "")
-            playlist_name = playing_from if playing_from != album_name else None
+            playlist_name = None
+            if playing_from != album_name and playing_from not in IGNORED_PLAYLISTS:
+                playlist_name = playing_from
             add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
                          ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
             return jsonify({"status": "scrobbled"})
