@@ -1259,10 +1259,6 @@ SCROBBLES_TEMPLATE = """
             <ul class="stat-list" id="topPlaylistsList"><li>Loading...</li></ul>
         </div>
         <div class="stat-card">
-            <h3>📈 Monthly Trend (last 12 months)</h3>
-            <canvas id="trendChart" width="100%" height="200"></canvas>
-        </div>
-        <div class="stat-card">
             <h3>🏷️ Top Genres</h3>
             <ul class="stat-list" id="topGenresList"><li>Loading...</li></ul>
         </div>
@@ -1405,33 +1401,6 @@ SCROBBLES_TEMPLATE = """
         }).catch(e => console.error('Top playlists error:', e));
     }
 
-    function fetchMonthlyTrend() {
-        fetch('/api/monthly_trend')
-            .then(r => r.json())
-            .then(data => {
-                const ctx = document.getElementById('trendChart').getContext('2d');
-                if (window.trendChart) window.trendChart.destroy();
-                window.trendChart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: data.map(d => d.month),
-                        datasets: [{
-                            label: 'Scrobbles',
-                            data: data.map(d => d.scrobbles),
-                            backgroundColor: '#36a2eb',
-                            borderRadius: 4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        plugins: { legend: { position: 'top' } }
-                    }
-                });
-            })
-            .catch(e => console.error('Monthly trend error:', e));
-    }
-
     function fetchTopGenres() {
         fetch('/api/top_genres')
             .then(r => r.json())
@@ -1507,7 +1476,6 @@ SCROBBLES_TEMPLATE = """
                 fetchTopArtistsByTime();
                 fetchTopDays();
                 fetchTopPlaylists();
-                fetchMonthlyTrend();
                 fetchTopGenres();
             } else {
                 alert(`Error: ${data.error}`);
@@ -1539,7 +1507,7 @@ SCROBBLES_TEMPLATE = """
     }
     function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
-    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchMonthlyTrend(); fetchTopGenres(); }).catch(e => alert('Import failed: ' + e)); }
+    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchTopGenres(); }).catch(e => alert('Import failed: ' + e)); }
 
     fetchNowPlaying();
     fetchStats();
@@ -1549,7 +1517,6 @@ SCROBBLES_TEMPLATE = """
     fetchTopArtistsByTime();
     fetchTopDays();
     fetchTopPlaylists();
-    fetchMonthlyTrend();
     fetchTopGenres();
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
@@ -1623,13 +1590,42 @@ MONTHLY_TEMPLATE = """
         .sub { color: var(--text-muted); font-size: 0.85rem; }
         .back-link { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.4rem 1rem; border-radius: 20px; text-decoration: none; color: var(--accent); font-size: 0.85rem; font-weight: 500; transition: all 0.2s; }
         .back-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
-        .controls { margin-bottom: 1.5rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .controls { margin-bottom: 1.5rem; }
+        .month-picker-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
         input { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary); }
         button { background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white; font-weight: bold; }
-        .report-stats { display: flex; gap: 2rem; justify-content: center; margin-bottom: 2rem; }
-        .stat-badge { text-align: center; background: var(--bg-card); padding: 1rem; border-radius: 16px; min-width: 150px; box-shadow: 0 1px 4px var(--shadow); }
+        .stats-trend-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+            align-items: stretch;
+        }
+        .stat-badge {
+            flex: 1;
+            min-width: 150px;
+            text-align: center;
+            background: var(--bg-card);
+            padding: 1rem;
+            border-radius: 16px;
+            box-shadow: 0 1px 4px var(--shadow);
+            border: 1px solid var(--border-card);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
         .stat-badge .label { font-size: 0.8rem; color: var(--text-muted); }
         .stat-badge .value { font-size: 2rem; font-weight: 600; color: var(--accent); }
+        .trend-card {
+            flex: 2;
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 0.75rem 1rem;
+            box-shadow: 0 1px 4px var(--shadow);
+            border: 1px solid var(--border-card);
+        }
+        .trend-card h4 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: var(--accent); }
+        .trend-card canvas { width: 100%; max-height: 150px; margin-top: 0; }
         .tables-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
         .table-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; border: 1px solid var(--border-card); }
         .table-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
@@ -1698,6 +1694,9 @@ MONTHLY_TEMPLATE = """
         }
         canvas { max-height: 300px; margin-top: 1rem; }
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
+        @media (max-width: 700px) {
+            .stats-trend-row { flex-direction: column; }
+        }
     </style>
 </head>
 <body>
@@ -1711,14 +1710,21 @@ MONTHLY_TEMPLATE = """
     </div>
 
     <div class="controls">
-        <input type="month" id="monthPicker" value="2025-05">
-        <button id="loadReportBtn">Generate Report</button>
+        <div class="month-picker-row">
+            <input type="month" id="monthPicker" value="2025-05">
+            <button id="loadReportBtn">Generate Report</button>
+        </div>
     </div>
 
     <div id="reportContent" style="display: none;">
-        <div class="report-stats">
+        <!-- Row: Total Scrobbles, Listening Time, and Trend Chart -->
+        <div class="stats-trend-row">
             <div class="stat-badge"><div class="label">Total Scrobbles</div><div class="value" id="totalScrobbles">-</div></div>
             <div class="stat-badge"><div class="label">Listening Time</div><div class="value" id="totalHours">-</div><div class="label">hours</div></div>
+            <div class="trend-card">
+                <h4>📈 Monthly Trend (last 12 months)</h4>
+                <canvas id="trendChart" width="100%" height="120"></canvas>
+            </div>
         </div>
 
         <div class="tables-grid">
@@ -1759,6 +1765,7 @@ MONTHLY_TEMPLATE = """
 
 <script>
     let clockChart = null;
+    let trendChart = null;
 
     async function loadReport() {
         const monthInput = document.getElementById('monthPicker').value;
@@ -1847,13 +1854,41 @@ MONTHLY_TEMPLATE = """
             loadingMsg.style.color = 'var(--accent)';
         }
     }
+
+    function loadTrendChart() {
+        fetch('/api/monthly_trend')
+            .then(r => r.json())
+            .then(data => {
+                const ctx = document.getElementById('trendChart').getContext('2d');
+                if (trendChart) trendChart.destroy();
+                trendChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.map(d => d.month),
+                        datasets: [{
+                            label: 'Scrobbles',
+                            data: data.map(d => d.scrobbles),
+                            backgroundColor: '#36a2eb',
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { beginAtZero: true } }
+                    }
+                });
+            })
+            .catch(e => console.error('Trend chart error:', e));
+    }
     
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
     }
 
-    // Playlist functions (rename)
+    // Playlist rename functions
     let currentPlaylists = [];
 
     function loadPlaylists() {
@@ -1898,8 +1933,9 @@ MONTHLY_TEMPLATE = """
                 alert('Error: ' + data.error);
             } else {
                 alert(`Renamed "${oldName}" to "${newName}" (${data.updated} scrobble(s) updated).`);
-                loadPlaylists();  // refresh list
-                loadGenreMappings(); // also refresh genre mapping list (playlist names changed)
+                loadPlaylists();
+                loadGenreMappings();
+                loadTrendChart();
             }
         })
         .catch(e => alert('Request failed: ' + e));
@@ -1912,7 +1948,6 @@ MONTHLY_TEMPLATE = """
         fetch('/api/playlist_genre_map')
             .then(r => r.json())
             .then(data => {
-                // Also need all playlists (including those without genre)
                 fetch('/api/playlists')
                     .then(r2 => r2.json())
                     .then(allPlaylists => {
@@ -1933,7 +1968,6 @@ MONTHLY_TEMPLATE = """
                             `;
                         });
                         container.innerHTML = html;
-                        // Attach save handlers
                         document.querySelectorAll('.save-genre-btn').forEach(btn => {
                             btn.addEventListener('click', (e) => {
                                 const playlist = btn.getAttribute('data-playlist');
@@ -1960,7 +1994,7 @@ MONTHLY_TEMPLATE = """
         .then(data => {
             if (data.error) alert('Error: ' + data.error);
             else alert(`Genre for "${playlist}" saved.`);
-            loadGenreMappings(); // refresh list
+            loadGenreMappings();
         })
         .catch(e => alert('Request failed: ' + e));
     }
@@ -1985,6 +2019,7 @@ MONTHLY_TEMPLATE = """
     loadReport();
     loadPlaylists();
     loadGenreMappings();
+    loadTrendChart();
 </script>
 </body>
 </html>
