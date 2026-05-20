@@ -1358,15 +1358,28 @@ SCROBBLES_TEMPLATE = """
     }
 
     function fetchWeekdayStats() {
-        fetch('/api/scrobbles_by_weekday').then(r => r.json()).then(data => {
-            const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-            const orderedData = dayOrder.map(day => { const found = data.find(d => d.day === day); return found ? found.count : 0; });
-            new Chart(document.getElementById('weekdayChart').getContext('2d'), {
-                type: 'bar', data: { labels: dayOrder, datasets: [{ label: 'Scrobbles', data: orderedData, backgroundColor: '#36a2eb', borderRadius: 4 }] },
-                options: { responsive: true, scales: { y: { beginAtZero: true } } }
-            });
-        }).catch(e => console.error('Weekday stats error:', e));
-    }
+    fetch('/api/scrobbles_by_weekday').then(r => r.json()).then(data => {
+        const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+        const orderedData = dayOrder.map(day => { const found = data.find(d => d.day === day); return found ? found.count : 0; });
+        new Chart(document.getElementById('weekdayChart').getContext('2d'), {
+            type: 'bar', 
+            data: { 
+                labels: dayOrder, 
+                datasets: [{ 
+                    label: 'Scrobbles', 
+                    data: orderedData, 
+                    backgroundColor: '#36a2eb', 
+                    borderRadius: 4 
+                }] 
+            },
+            options: { 
+                responsive: true, 
+                scales: { y: { beginAtZero: true } },
+                plugins: { legend: { display: false } }   // ← hides the legend
+            }
+        });
+    }).catch(e => console.error('Weekday stats error:', e));
+}
 
     function fetchTopArtistsByTime() {
         fetch('/api/top_artists_by_time').then(r => r.json()).then(data => {
