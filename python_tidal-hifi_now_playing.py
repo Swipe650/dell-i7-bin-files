@@ -960,6 +960,28 @@ def api_set_artist_genre():
         conn.close()
         return jsonify({"status": "saved"})
 
+@app.route('/api/artist_genre_map')
+def api_artist_genre_map():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT artist, genre FROM artist_genre_map ORDER BY artist")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"artist": row[0], "genre": row[1]} for row in rows])
+
+@app.route('/api/search_artists', methods=['GET'])
+def api_search_artists():
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify([])
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    # Search for artists that contain the query (case‑insensitive)
+    c.execute("SELECT DISTINCT artist FROM scrobbles WHERE artist LIKE ? ORDER BY artist LIMIT 50", (f'%{query}%',))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([row[0] for row in rows])
+
 @app.route('/api/set_album_genre', methods=['POST'])
 def api_set_album_genre():
     data = request.get_json()
@@ -982,6 +1004,23 @@ def api_set_album_genre():
         conn.commit()
         conn.close()
         return jsonify({"status": "saved"})
+
+@app.route('/api/backfill_artist_genres', methods=['POST'])
+def api_backfill_artist_genres():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        UPDATE scrobbles
+        SET genre = (
+            SELECT genre FROM artist_genre_map
+            WHERE artist_genre_map.artist = scrobbles.artist
+        )
+        WHERE EXISTS (SELECT 1 FROM artist_genre_map WHERE artist = scrobbles.artist)
+    """)
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "updated": updated})
 
 @app.route('/api/backfill_album_genres', methods=['POST'])
 def api_backfill_album_genres():
@@ -1967,6 +2006,22 @@ MONTHLY_TEMPLATE = """
             <div class="empty-message">Loading playlists...</div>
         </div>
         <button id="backfillGenresBtn" class="backfill-btn">Backfill Genres for Past Scrobbles</button>
+        <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
+    <button id="backfillArtistGenresBtn" class="backfill-btn">Backfill Artist Genres</button>
+    <button id="backfillAlbumGenresBtn" class="backfill-btn">Backfill Album Genres</button>
+    </div>
+        <!-- Artist Genre Tagging Tool -->
+    <div class="table-card" style="margin-top: 2rem;">
+        <h3>🏷️ Tag Artist by Genre</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Search for an artist, then assign a genre (artist genre overrides playlist/album genres).</p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+            <input type="text" id="artistSearchInput" placeholder="Type artist name..." style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+            <button id="searchArtistBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
+        </div>
+        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-message">Search for an artist to assign a genre.</div>
+        </div>
+    </div>
     </div>
 
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
@@ -2217,7 +2272,113 @@ MONTHLY_TEMPLATE = """
             })
             .catch(e => alert('Error: ' + e));
     }
+    
+    function backfillArtistGenres() {
+    if (!confirm("This will update all existing scrobbles that have an artist with a genre mapping. Continue?")) return;
+    fetch('/api/backfill_artist_genres', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            alert(`Artist backfill complete. ${data.updated} scrobbles updated.`);
+        })
+        .catch(e => alert('Error: ' + e));
+}
 
+    function backfillAlbumGenres() {
+        if (!confirm("This will update all existing scrobbles that have an album (with matching artist) with a genre mapping. Continue?")) return;
+        fetch('/api/backfill_album_genres', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                alert(`Album backfill complete. ${data.updated} scrobbles updated.`);
+            })
+            .catch(e => alert('Error: ' + e));
+    }
+    
+    // Artist genre tagging functions
+let currentArtistSearchResults = [];
+
+function searchArtists() {
+    const query = document.getElementById('artistSearchInput').value.trim();
+    const resultsDiv = document.getElementById('artistSearchResults');
+    if (!query) {
+        resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>';
+        return;
+    }
+    resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+    fetch(`/api/search_artists?q=${encodeURIComponent(query)}`)
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })
+        .then(artists => {
+            console.log("Artists found:", artists);  // Debug: see in console
+            if (!artists.length) {
+                resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
+                return;
+            }
+            // Now get genre mappings
+            return fetch('/api/artist_genre_map')
+                .then(r => r.json())
+                .then(mappings => ({ artists, mappings }));
+        })
+        .then(({ artists, mappings }) => {
+            let html = '';
+            artists.forEach(artist => {
+                const existing = mappings.find(m => m.artist === artist);
+                const genre = existing ? existing.genre : '';
+                html += `
+                    <div class="playlist-item" data-artist="${escapeHtml(artist)}">
+                        <span class="playlist-name">${escapeHtml(artist)}</span>
+                        <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                        <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
+                    </div>
+                `;
+            });
+            resultsDiv.innerHTML = html;
+            // Attach save handlers
+            document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
+                btn.removeEventListener('click', btn._listener);
+                const listener = () => {
+                    const artist = btn.getAttribute('data-artist');
+                    const input = btn.parentElement.querySelector('.genre-input');
+                    const genreVal = input.value.trim();
+                    saveArtistGenre(artist, genreVal);
+                };
+                btn.addEventListener('click', listener);
+                btn._listener = listener;
+            });
+        })
+        .catch(err => {
+            console.error("Search error:", err);
+            resultsDiv.innerHTML = `<div class="empty-message">Error: ${err.message}</div>`;
+        });
+}
+
+function saveArtistGenre(artist, genre) {
+    fetch('/api/set_artist_genre', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist: artist, genre: genre })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) alert('Error: ' + data.error);
+        else alert(`Genre for "${artist}" saved.`);
+        // Refresh search results to reflect saved genre
+        searchArtists();
+    })
+    .catch(e => alert('Request failed: ' + e));
+}
+
+// Attach event listener for the search button and Enter key
+document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
+document.getElementById('artistSearchInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') searchArtists();
+});
+    
+    // Attach event listeners
+    document.getElementById('backfillArtistGenresBtn').addEventListener('click', backfillArtistGenres);
+    document.getElementById('backfillAlbumGenresBtn').addEventListener('click', backfillAlbumGenres);
+    
     const now = new Date();
     document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
