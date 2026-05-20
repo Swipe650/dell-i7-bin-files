@@ -10,7 +10,7 @@ fi
 
 vol=$(/home/swipe/bin/cast-linux-amd64 --name "$google_home" status | awk -F 'Volume:' '{print $2}' | cut -c3-5)
 
-/home/swipe/bin/cast-linux-amd64 --name "$google_home" media play http://radio.talkradio.co.uk/stream?
+/home/swipe/bin/cast-linux-amd64 --name "$google_home" media play https://talk.live.stream.broadcasting.news/stream?
 
 /home/swipe/bin/cast-linux-amd64 --name "$google_home" volume $vol
 
