@@ -4,60 +4,44 @@ google_home="Kitchen home"
 #google_home="Bedroom mini"
 
 CAST_CMD="/home/swipe/bin/cast-linux-amd64 --name \"$google_home\""
-# Unmute the device
-mute () { eval $CAST_CMD mute; }
 
-# Mute the device if it's not already muted
+mute () { eval $CAST_CMD mute; }
 unmute () { eval $CAST_CMD unmute; }
 
-# Default mute/unmute cycle
-set_default_mute_time() 
-{
-    mute
-    sleep 180
-    unmute
-}
+# Get mute duration based on time/day, or top-of-hour override
+get_mute_duration() {
+    minute=$(date +%M)   # 00-59
+    hour=$(date +%H)     # 00-23
+    dow=$(date +%u)      # 1=Monday ... 7=Sunday
 
-# LBC-specific mute/unmute cycle
-set_lbc_mute_time() {
-    mute
-    sleep 160
-    unmute
-}
-
-# Function to check the top of the hour for different cases
-check_top_of_the_hour() {
-    # Get the current time in minutes
-    currenttime=$(date +%M)
-
-    # Check for TalkRadio
-    if [ -f .tr ]; then
-        if [[ "$currenttime" =~ ^(01|02|03|04|58|59)$ ]]; then
-            mute
-            sleep 50
-            unmute
-        elif [[ "$currenttime" =~ ^(32|33|34|35|36|37|05|06|07)$ ]]; then
-            mute
-            sleep 140
-            unmute
-        else
-            mute
-            set_default_mute_time
-            unmute
+    # Top of the hour (minutes 01 through 07)
+    if [[ $minute -ge 1 && $minute -le 7 ]]; then
+        if [ -f "$HOME/.tr" ]; then
+            echo 50
+            return
+        elif [ -f "$HOME/.lbc" ]; then
+            echo 30
+            return
         fi
+        # If both missing, fall through to normal schedule
     fi
 
-    # Check for LBC UK
-    if [ -f .lbc ]; then
-        if [ "$currenttime" -gt "00" ] && [ "$currenttime" -lt "07" ]; then
-            mute
-            sleep 30
-            unmute
+    # Normal time‑based schedule
+    if [[ $hour -ge 6 && $hour -lt 19 ]]; then
+        echo 121
+    elif [[ $hour -ge 19 && $hour -lt 22 ]]; then
+        if [[ $dow -ge 1 && $dow -le 5 ]]; then
+            echo 140
         else
-            set_lbc_mute_time
+            echo 125
         fi
+    else
+        echo 120
     fi
 }
 
-# Run the check
-check_top_of_the_hour
+# Main mute cycle
+duration=$(get_mute_duration)
+mute
+sleep "$duration"
+unmute
