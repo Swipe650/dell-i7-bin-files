@@ -115,11 +115,13 @@ def init_db():
         sample_rate INTEGER,
         codec TEXT,
         playlist TEXT,
-        lastfm_scrobbled INTEGER DEFAULT 0
+        lastfm_scrobbled INTEGER DEFAULT 0,
+        genre TEXT
     )''')
     conn.commit()
     conn.close()
     migrate_db()
+    migrate_genre_db()
 
 def migrate_db():
     conn = sqlite3.connect(DATABASE)
@@ -133,17 +135,41 @@ def migrate_db():
     conn.commit()
     conn.close()
 
+def migrate_genre_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(scrobbles)")
+    columns = [col[1] for col in c.fetchall()]
+    if 'genre' not in columns:
+        c.execute("ALTER TABLE scrobbles ADD COLUMN genre TEXT")
+    c.execute('''CREATE TABLE IF NOT EXISTS playlist_genre_map (
+        playlist_name TEXT PRIMARY KEY,
+        genre TEXT NOT NULL
+    )''')
+    conn.commit()
+    conn.close()
+
 def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
     timestamp = int(time.time())
+    # Look up genre from mapping if playlist exists
+    genre = None
+    if playlist:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
+        row = c.fetchone()
+        if row:
+            genre = row[0]
+        conn.close()
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute('''INSERT INTO scrobbles 
-        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, 0))
+        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled, genre)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, 0, genre))
     conn.commit()
     conn.close()
-    print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else ""))
+    print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else "") + (f" [genre: {genre}]" if genre else ""))
     # Send to Last.fm
     network = get_lastfm_network()
     if network:
@@ -279,12 +305,12 @@ def import_scrobbles_from_json(data):
                   (item['timestamp'], item['track'], item['artist']))
         if not c.fetchone():
             c.execute('''INSERT INTO scrobbles 
-                (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled, genre)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (item['timestamp'], item['track'], item['artist'], item.get('album'),
                  item.get('art_url'), item.get('duration_sec'), item.get('quality'),
                  item.get('bit_depth'), item.get('sample_rate'), item.get('codec'), 
-                 item.get('playlist'), 0))
+                 item.get('playlist'), 0, item.get('genre')))
             inserted += 1
     conn.commit()
     conn.close()
@@ -580,6 +606,22 @@ def api_top_playlists():
     top = get_top_playlists(25)
     return jsonify(top)
 
+@app.route('/api/top_genres')
+def api_top_genres():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT genre, COUNT(*) as count
+        FROM scrobbles
+        WHERE genre IS NOT NULL AND genre != ''
+        GROUP BY genre
+        ORDER BY count DESC
+        LIMIT 10
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"genre": row[0], "count": row[1]} for row in rows])
+
 @app.route('/api/monthly_report')
 def api_monthly_report():
     year = request.args.get('year', type=int)
@@ -807,6 +849,57 @@ def api_rename_playlist():
         return jsonify({"status": "ok", "updated": updated})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ---------- GENRE MAPPING ENDPOINTS ----------
+@app.route('/api/playlist_genre_map')
+def api_playlist_genre_map():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT playlist_name, genre FROM playlist_genre_map ORDER BY playlist_name")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"playlist": row[0], "genre": row[1]} for row in rows])
+
+@app.route('/api/set_playlist_genre', methods=['POST'])
+def api_set_playlist_genre():
+    data = request.get_json()
+    playlist = data.get('playlist')
+    genre = data.get('genre')
+    if not playlist:
+        return jsonify({"error": "Missing playlist name"}), 400
+    if not genre:
+        # Delete mapping
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("DELETE FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "removed"})
+    else:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO playlist_genre_map (playlist_name, genre) VALUES (?, ?)", (playlist, genre))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "saved"})
+
+@app.route('/api/backfill_genres', methods=['POST'])
+def api_backfill_genres():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        UPDATE scrobbles
+        SET genre = (
+            SELECT genre FROM playlist_genre_map
+            WHERE playlist_genre_map.playlist_name = scrobbles.playlist
+        )
+        WHERE playlist IS NOT NULL AND playlist != ''
+          AND EXISTS (SELECT 1 FROM playlist_genre_map WHERE playlist_name = scrobbles.playlist)
+    """)
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "updated": updated})
 
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
@@ -1169,6 +1262,10 @@ SCROBBLES_TEMPLATE = """
             <h3>📈 Monthly Trend (last 12 months)</h3>
             <canvas id="trendChart" width="100%" height="200"></canvas>
         </div>
+        <div class="stat-card">
+            <h3>🏷️ Top Genres</h3>
+            <ul class="stat-list" id="topGenresList"><li>Loading...</li></ul>
+        </div>
     </div>
 
     <div class="tools">
@@ -1283,23 +1380,23 @@ SCROBBLES_TEMPLATE = """
     }
     
     function fetchTopDays() {
-    fetch('/api/longest_listening_day')
-        .then(r => r.json())
-        .then(data => {
-            const container = document.getElementById('topDaysList');
-            if (data.length === 0) {
-                container.innerHTML = '<li>No scrobbles yet</li>';
-            } else {
-                container.innerHTML = data.map(d => `
-                    <li>
-                        <span>📅 ${d.date}</span>
-                        <span class="stat-count">${d.scrobbles} scrobbles</span>
-                    </li>
-                `).join('');
-            }
-        })
-        .catch(e => console.error('Top days error:', e));
-}
+        fetch('/api/longest_listening_day')
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('topDaysList');
+                if (data.length === 0) {
+                    container.innerHTML = '<li>No scrobbles yet</li>';
+                } else {
+                    container.innerHTML = data.map(d => `
+                        <li>
+                            <span>📅 ${d.date}</span>
+                            <span class="stat-count">${d.scrobbles} scrobbles</span>
+                        </li>
+                    `).join('');
+                }
+            })
+            .catch(e => console.error('Top days error:', e));
+    }
     
     function fetchTopPlaylists() {
         fetch('/api/top_playlists').then(r => r.json()).then(data => {
@@ -1333,6 +1430,20 @@ SCROBBLES_TEMPLATE = """
                 });
             })
             .catch(e => console.error('Monthly trend error:', e));
+    }
+
+    function fetchTopGenres() {
+        fetch('/api/top_genres')
+            .then(r => r.json())
+            .then(data => {
+                const container = document.getElementById('topGenresList');
+                if (data.length === 0) {
+                    container.innerHTML = '<li>No genre data yet. Assign genres on the Monthly Reports page.</li>';
+                } else {
+                    container.innerHTML = data.map(g => `<li><span>${escapeHtml(g.genre)}</span><span class="stat-count">${g.count}</span></li>`).join('');
+                }
+            })
+            .catch(e => console.error('Top genres error:', e));
     }
 
     let currentOffset = 0; const limit = 25;
@@ -1397,6 +1508,7 @@ SCROBBLES_TEMPLATE = """
                 fetchTopDays();
                 fetchTopPlaylists();
                 fetchMonthlyTrend();
+                fetchTopGenres();
             } else {
                 alert(`Error: ${data.error}`);
             }
@@ -1427,7 +1539,7 @@ SCROBBLES_TEMPLATE = """
     }
     function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
-    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchMonthlyTrend(); }).catch(e => alert('Import failed: ' + e)); }
+    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchMonthlyTrend(); fetchTopGenres(); }).catch(e => alert('Import failed: ' + e)); }
 
     fetchNowPlaying();
     fetchStats();
@@ -1438,6 +1550,7 @@ SCROBBLES_TEMPLATE = """
     fetchTopDays();
     fetchTopPlaylists();
     fetchMonthlyTrend();
+    fetchTopGenres();
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
 </script>
@@ -1555,6 +1668,34 @@ MONTHLY_TEMPLATE = """
         .edit-playlist-btn:hover {
             background: var(--button-hover);
         }
+        .genre-input {
+            background: var(--button-bg);
+            border: 1px solid var(--button-border);
+            border-radius: 6px;
+            padding: 4px 8px;
+            margin: 0 10px;
+            width: 120px;
+            color: var(--text-primary);
+        }
+        .save-genre-btn {
+            background: var(--accent);
+            border: none;
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+            color: white;
+            font-size: 0.75rem;
+        }
+        .backfill-btn {
+            background: #6c757d;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            cursor: pointer;
+            color: white;
+            font-size: 0.8rem;
+            margin-top: 1rem;
+        }
         canvas { max-height: 300px; margin-top: 1rem; }
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
     </style>
@@ -1601,6 +1742,16 @@ MONTHLY_TEMPLATE = """
         <div id="playlistList" style="max-height: 300px; overflow-y: auto;">
             <div class="empty-message">Loading playlists...</div>
         </div>
+    </div>
+
+    <!-- Genre Tagging Tool -->
+    <div class="table-card" style="margin-top: 2rem;">
+        <h3>🏷️ Genre Tagging (by Playlist)</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Assign a genre to each playlist – all scrobbles from that playlist will be tagged.</p>
+        <div id="genreMappingList" style="max-height: 400px; overflow-y: auto;">
+            <div class="empty-message">Loading playlists...</div>
+        </div>
+        <button id="backfillGenresBtn" class="backfill-btn">Backfill Genres for Past Scrobbles</button>
     </div>
 
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
@@ -1702,7 +1853,7 @@ MONTHLY_TEMPLATE = """
         return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
     }
 
-    // Playlist functions
+    // Playlist functions (rename)
     let currentPlaylists = [];
 
     function loadPlaylists() {
@@ -1748,20 +1899,92 @@ MONTHLY_TEMPLATE = """
             } else {
                 alert(`Renamed "${oldName}" to "${newName}" (${data.updated} scrobble(s) updated).`);
                 loadPlaylists();  // refresh list
-                // Optionally, if the monthly report uses playlists, you could reload it too.
+                loadGenreMappings(); // also refresh genre mapping list (playlist names changed)
             }
         })
         .catch(e => alert('Request failed: ' + e));
     }
-    
+
+    // Genre tagging functions
+    function loadGenreMappings() {
+        const container = document.getElementById('genreMappingList');
+        container.innerHTML = '<div class="empty-message">Loading...</div>';
+        fetch('/api/playlist_genre_map')
+            .then(r => r.json())
+            .then(data => {
+                // Also need all playlists (including those without genre)
+                fetch('/api/playlists')
+                    .then(r2 => r2.json())
+                    .then(allPlaylists => {
+                        if (allPlaylists.length === 0) {
+                            container.innerHTML = '<div class="empty-message">No playlists found in scrobbles.</div>';
+                            return;
+                        }
+                        let html = '';
+                        allPlaylists.forEach(playlist => {
+                            const existing = data.find(m => m.playlist === playlist);
+                            const genre = existing ? existing.genre : '';
+                            html += `
+                                <div class="playlist-item" data-playlist="${escapeHtml(playlist)}">
+                                    <span class="playlist-name">${escapeHtml(playlist)}</span>
+                                    <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                                    <button class="save-genre-btn" data-playlist="${escapeHtml(playlist)}">Save</button>
+                                </div>
+                            `;
+                        });
+                        container.innerHTML = html;
+                        // Attach save handlers
+                        document.querySelectorAll('.save-genre-btn').forEach(btn => {
+                            btn.addEventListener('click', (e) => {
+                                const playlist = btn.getAttribute('data-playlist');
+                                const input = btn.parentElement.querySelector('.genre-input');
+                                const genreVal = input.value.trim();
+                                saveGenreMapping(playlist, genreVal);
+                            });
+                        });
+                    });
+            })
+            .catch(e => {
+                console.error(e);
+                container.innerHTML = '<div class="empty-message">Error loading genre mappings.</div>';
+            });
+    }
+
+    function saveGenreMapping(playlist, genre) {
+        fetch('/api/set_playlist_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playlist: playlist, genre: genre })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else alert(`Genre for "${playlist}" saved.`);
+            loadGenreMappings(); // refresh list
+        })
+        .catch(e => alert('Request failed: ' + e));
+    }
+
+    function backfillGenres() {
+        if (!confirm("This will update all existing scrobbles that have a playlist with a genre mapping. Continue?")) return;
+        fetch('/api/backfill_genres', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                alert(`Backfill complete. ${data.updated} scrobbles updated.`);
+            })
+            .catch(e => alert('Error: ' + e));
+    }
+
     const now = new Date();
     document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
+    document.getElementById('backfillGenresBtn').addEventListener('click', backfillGenres);
     
     if (localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
     
     loadReport();
-    loadPlaylists();   // load playlist renaming tool
+    loadPlaylists();
+    loadGenreMappings();
 </script>
 </body>
 </html>
@@ -1776,13 +1999,12 @@ if __name__ == '__main__':
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    print(f"✅ TIDAL HIFI FULL SCROBBLER (Last.fm + Monthly Reports in new page)")
+    print(f"✅ TIDAL HIFI FULL SCROBBLER (with genre tagging)")
     print(f"📀 Database: {DATABASE}")
     print("🌐 Player: http://127.0.0.1:5000")
     print("📊 Overview: http://127.0.0.1:5000/scrobbles")
-    print("📅 Monthly Reports: http://127.0.0.1:5000/monthly")
+    print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
     
-    # Set up Ctrl+C handler
     signal.signal(signal.SIGINT, signal_handler)
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
