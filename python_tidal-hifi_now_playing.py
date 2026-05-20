@@ -569,13 +569,11 @@ def api_longest_listening_day():
         FROM scrobbles
         GROUP BY day
         ORDER BY scrobble_count DESC
-        LIMIT 1
+        LIMIT 5
     """)
-    row = c.fetchone()
+    rows = c.fetchall()
     conn.close()
-    if row:
-        return jsonify({"date": row[0], "scrobbles": row[1]})
-    return jsonify({"date": None, "scrobbles": 0})
+    return jsonify([{"date": row[0], "scrobbles": row[1]} for row in rows])
 
 @app.route('/api/top_playlists')
 def api_top_playlists():
@@ -1129,8 +1127,10 @@ SCROBBLES_TEMPLATE = """
             <ul class="stat-list" id="topArtistsTimeList"><li>Loading...</li></ul>
         </div>
         <div class="stat-card">
-            <h3>🏆 Longest Listening Day</h3>
-            <div id="longestDayInfo" class="highlight-text">Loading...</div>
+            <h3>🏆 Top 5 Listening Days</h3>
+            <ul class="stat-list" id="topDaysList">
+                <li>Loading...</li>
+            </ul>
         </div>
         <div class="stat-card">
             <h3>📀 Top Playlists</h3>
@@ -1252,13 +1252,26 @@ SCROBBLES_TEMPLATE = """
             container.innerHTML = data.length ? data.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.hours}h</span></li>`).join('') : '<li>No data yet</li>';
         }).catch(e => console.error('Top artists by time error:', e));
     }
-
-    function fetchLongestDay() {
-        fetch('/api/longest_listening_day').then(r => r.json()).then(data => {
-            document.getElementById('longestDayInfo').innerHTML = data.date ? `📅 ${data.date}<br>🎧 ${data.scrobbles} scrobbles` : 'No scrobbles yet';
-        }).catch(e => console.error('Longest day error:', e));
-    }
-
+    
+    function fetchTopDays() {
+    fetch('/api/longest_listening_day')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('topDaysList');
+            if (data.length === 0) {
+                container.innerHTML = '<li>No scrobbles yet</li>';
+            } else {
+                container.innerHTML = data.map(d => `
+                    <li>
+                        <span>📅 ${d.date}</span>
+                        <span class="stat-count">${d.scrobbles} scrobbles</span>
+                    </li>
+                `).join('');
+            }
+        })
+        .catch(e => console.error('Top days error:', e));
+}
+    
     function fetchTopPlaylists() {
         fetch('/api/top_playlists').then(r => r.json()).then(data => {
             const container = document.getElementById('topPlaylistsList');
@@ -1352,7 +1365,7 @@ SCROBBLES_TEMPLATE = """
                 fetchListeningClock();
                 fetchWeekdayStats();
                 fetchTopArtistsByTime();
-                fetchLongestDay();
+                fetchTopDays();
                 fetchTopPlaylists();
                 fetchMonthlyTrend();
             } else {
@@ -1385,7 +1398,7 @@ SCROBBLES_TEMPLATE = """
     }
     function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
-    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchLongestDay(); fetchTopPlaylists(); fetchMonthlyTrend(); }).catch(e => alert('Import failed: ' + e)); }
+    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchMonthlyTrend(); }).catch(e => alert('Import failed: ' + e)); }
 
     fetchNowPlaying();
     fetchStats();
@@ -1393,7 +1406,7 @@ SCROBBLES_TEMPLATE = """
     fetchListeningClock();
     fetchWeekdayStats();
     fetchTopArtistsByTime();
-    fetchLongestDay();
+    fetchTopDays();
     fetchTopPlaylists();
     fetchMonthlyTrend();
     loadScrobbles(0);
