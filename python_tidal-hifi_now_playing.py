@@ -769,6 +769,32 @@ def scrobble_now():
             return jsonify({"status": "scrobbled"})
     return jsonify({"status": "no track playing"}), 400
 
+@app.route('/api/current_genre')
+def api_current_genre():
+    artist = request.args.get('artist', '')
+    album = request.args.get('album', '')
+    playlist = request.args.get('playlist', '')
+    genre = None
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    if artist:
+        c.execute("SELECT genre FROM artist_genre_map WHERE artist = ?", (artist,))
+        row = c.fetchone()
+        if row:
+            genre = row[0]
+    if not genre and album and artist:
+        c.execute("SELECT genre FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
+        row = c.fetchone()
+        if row:
+            genre = row[0]
+    if not genre and playlist:
+        c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
+        row = c.fetchone()
+        if row:
+            genre = row[0]
+    conn.close()
+    return jsonify({"genre": genre})
+
 @app.route('/export')
 def export_data():
     data = export_scrobbles_to_json()
@@ -1095,7 +1121,7 @@ HTML_TEMPLATE = """
         .tag-bar .btn-sm:hover { background: rgba(255,255,255,0.3); }
         .tag-item { display: inline-flex; align-items: center; gap: 8px; }
         .meta { margin-top:10px; font-size:0.85em; color:#bbb; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-        .quality-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; background: rgba(255,255,255,0.1); }
+        .quality-badge, .genre-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; background: rgba(255,255,255,0.1); }
         .bitrate { font-size:0.95em; font-family: monospace; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; }
         .bitrate-max { color: #FFB347; background-color: rgba(255, 179, 71, 0.20); }
         .bitrate-high { color: #40E0D0; background-color: rgba(64, 224, 208, 0.20); }
@@ -1139,6 +1165,7 @@ HTML_TEMPLATE = """
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="qualityBadge" class="quality-badge"></span>
+                        <span id="currentGenre" class="genre-badge" style="display: none;"></span>
                     </div>
                     <span id="bitrate" class="bitrate"></span>
                 </div>
@@ -1203,6 +1230,27 @@ function updateTaggingInfo(data) {
     document.getElementById('currentAlbumForTag').innerText = currentAlbum || "-";
 }
 
+function fetchCurrentGenre(artist, album, playlist) {
+    const url = `/api/current_genre?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}&playlist=${encodeURIComponent(playlist)}`;
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            const genreSpan = document.getElementById('currentGenre');
+            if (data.genre && data.genre !== '') {
+                // If genre already starts with the emoji, don't add another
+                let displayGenre = data.genre;
+                if (!displayGenre.startsWith('🏷️')) {
+                    displayGenre = `🏷️ ${displayGenre}`;
+                }
+genreSpan.innerText = displayGenre;
+                genreSpan.style.display = 'inline-flex';
+            } else {
+                genreSpan.style.display = 'none';
+            }
+        })
+        .catch(e => console.error("Genre fetch error:", e));
+}
+
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
@@ -1225,6 +1273,10 @@ function updateUI(data) {
     document.getElementById('favicon').href = data.art;
     trackDurationSec = data.duration_sec || trackDurationSec;
     updateTaggingInfo(data);
+    
+    // Fetch genre for current track
+    let playlistName = data.playing_from.replace(/^Playing from: /, '');
+    fetchCurrentGenre(data.artist, data.album, playlistName);
 }
 
 socket.on('update', (data) => updateUI(data));
@@ -1238,7 +1290,7 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
     fetch(`/seek/${Math.floor(percent * trackDurationSec)}`, { method: 'PUT' });
 });
 
-// Tagging functions
+// Tagging functions (unchanged)
 function tagArtist() {
     if (!currentArtist) {
         alert("No artist playing.");
@@ -1610,7 +1662,7 @@ SCROBBLES_TEMPLATE = """
             options: { 
                 responsive: true, 
                 scales: { y: { beginAtZero: true } },
-                plugins: { legend: { display: false } }   // ← hides the legend
+                plugins: { legend: { display: false } }
             }
         });
     }).catch(e => console.error('Weekday stats error:', e));
