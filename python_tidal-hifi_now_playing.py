@@ -1281,7 +1281,7 @@ MONTHLY_TEMPLATE = """
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         :root {
-            --bg-body: #f9f9f9;
+            --bg-body: #e8e8e8;
             --bg-card: #ffffff;
             --bg-tools: #ffffff;
             --text-primary: #222;
