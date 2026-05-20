@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
+import signal
+import sys
 
 # ------------------------- CONFIGURATION -------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1500,6 +1502,10 @@ MONTHLY_TEMPLATE = """
 </html>
 """
 
+def signal_handler(sig, frame):
+    print("\n👋 Goodbye!")
+    sys.exit(0)
+
 # ------------------------- MAIN -------------------------
 if __name__ == '__main__':
     init_db()
@@ -1510,4 +1516,8 @@ if __name__ == '__main__':
     print("🌐 Player: http://127.0.0.1:5000")
     print("📊 Overview: http://127.0.0.1:5000/scrobbles")
     print("📅 Monthly Reports: http://127.0.0.1:5000/monthly")
+    
+    # Set up Ctrl+C handler
+    signal.signal(signal.SIGINT, signal_handler)
+    
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
