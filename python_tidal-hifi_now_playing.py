@@ -906,10 +906,10 @@ SCROBBLES_TEMPLATE = """
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         :root {
-            --bg-body: #f9f9f9;
-            --bg-card: #ffffff;
+            --bg-body: #ececec;
+            --bg-card: #f5f5f5;
             --bg-tools: #ffffff;
-            --text-primary: #222;
+            --text-primary: #2c2c2c; 
             --text-secondary: #666;
             --text-muted: #999;
             --border-light: #e5e5e5;
