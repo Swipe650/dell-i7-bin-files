@@ -2310,42 +2310,45 @@ function searchArtists() {
             return response.json();
         })
         .then(artists => {
-            console.log("Artists found:", artists);  // Debug: see in console
+            console.log("Artists found:", artists);
             if (!artists.length) {
                 resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
                 return;
             }
-            // Now get genre mappings
-            return fetch('/api/artist_genre_map')
+            // Only fetch genre map if artists exist
+            fetch('/api/artist_genre_map')
                 .then(r => r.json())
-                .then(mappings => ({ artists, mappings }));
-        })
-        .then(({ artists, mappings }) => {
-            let html = '';
-            artists.forEach(artist => {
-                const existing = mappings.find(m => m.artist === artist);
-                const genre = existing ? existing.genre : '';
-                html += `
-                    <div class="playlist-item" data-artist="${escapeHtml(artist)}">
-                        <span class="playlist-name">${escapeHtml(artist)}</span>
-                        <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
-                        <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
-                    </div>
-                `;
-            });
-            resultsDiv.innerHTML = html;
-            // Attach save handlers
-            document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
-                btn.removeEventListener('click', btn._listener);
-                const listener = () => {
-                    const artist = btn.getAttribute('data-artist');
-                    const input = btn.parentElement.querySelector('.genre-input');
-                    const genreVal = input.value.trim();
-                    saveArtistGenre(artist, genreVal);
-                };
-                btn.addEventListener('click', listener);
-                btn._listener = listener;
-            });
+                .then(mappings => {
+                    let html = '';
+                    artists.forEach(artist => {
+                        const existing = mappings.find(m => m.artist === artist);
+                        const genre = existing ? existing.genre : '';
+                        html += `
+                            <div class="playlist-item" data-artist="${escapeHtml(artist)}">
+                                <span class="playlist-name">${escapeHtml(artist)}</span>
+                                <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                                <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+                    // Attach save handlers
+                    document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
+                        btn.removeEventListener('click', btn._listener);
+                        const listener = () => {
+                            const artist = btn.getAttribute('data-artist');
+                            const input = btn.parentElement.querySelector('.genre-input');
+                            const genreVal = input.value.trim();
+                            saveArtistGenre(artist, genreVal);
+                        };
+                        btn.addEventListener('click', listener);
+                        btn._listener = listener;
+                    });
+                })
+                .catch(err => {
+                    console.error("Error fetching genre map:", err);
+                    resultsDiv.innerHTML = `<div class="empty-message">Error loading genre data: ${err.message}</div>`;
+                });
         })
         .catch(err => {
             console.error("Search error:", err);
