@@ -765,6 +765,22 @@ def view_cache():
     html += "</ul><p><a href='/'>Back</a></p>"
     return html
 
+@app.route('/api/monthly_trend')
+def api_monthly_trend():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT strftime('%Y-%m', datetime(timestamp, 'unixepoch')) as month,
+               COUNT(*) as scrobbles
+        FROM scrobbles
+        WHERE timestamp >= strftime('%s', 'now', '-12 months')
+        GROUP BY month
+        ORDER BY month
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"month": row[0], "scrobbles": row[1]} for row in rows])
+
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -1120,6 +1136,10 @@ SCROBBLES_TEMPLATE = """
             <h3>📀 Top Playlists</h3>
             <ul class="stat-list" id="topPlaylistsList"><li>Loading...</li></ul>
         </div>
+        <div class="stat-card">
+            <h3>📈 Monthly Trend (last 12 months)</h3>
+            <canvas id="trendChart" width="100%" height="200"></canvas>
+        </div>
     </div>
 
     <div class="tools">
@@ -1246,6 +1266,33 @@ SCROBBLES_TEMPLATE = """
         }).catch(e => console.error('Top playlists error:', e));
     }
 
+    function fetchMonthlyTrend() {
+        fetch('/api/monthly_trend')
+            .then(r => r.json())
+            .then(data => {
+                const ctx = document.getElementById('trendChart').getContext('2d');
+                if (window.trendChart) window.trendChart.destroy();
+                window.trendChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.map(d => d.month),
+                        datasets: [{
+                            label: 'Scrobbles',
+                            data: data.map(d => d.scrobbles),
+                            backgroundColor: '#36a2eb',
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: { legend: { position: 'top' } }
+                    }
+                });
+            })
+            .catch(e => console.error('Monthly trend error:', e));
+    }
+
     let currentOffset = 0; const limit = 25;
     function loadScrobbles(offset) {
         const container = document.getElementById('scrobbleList');
@@ -1302,12 +1349,12 @@ SCROBBLES_TEMPLATE = """
                 rowElement.remove();
                 fetchStats();
                 fetchListeningTime();
-                // Optionally refresh other stats that depend on total scrobbles
                 fetchListeningClock();
                 fetchWeekdayStats();
                 fetchTopArtistsByTime();
                 fetchLongestDay();
                 fetchTopPlaylists();
+                fetchMonthlyTrend();
             } else {
                 alert(`Error: ${data.error}`);
             }
@@ -1338,7 +1385,7 @@ SCROBBLES_TEMPLATE = """
     }
     function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
-    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchLongestDay(); fetchTopPlaylists(); }).catch(e => alert('Import failed: ' + e)); }
+    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchLongestDay(); fetchTopPlaylists(); fetchMonthlyTrend(); }).catch(e => alert('Import failed: ' + e)); }
 
     fetchNowPlaying();
     fetchStats();
@@ -1348,6 +1395,7 @@ SCROBBLES_TEMPLATE = """
     fetchTopArtistsByTime();
     fetchLongestDay();
     fetchTopPlaylists();
+    fetchMonthlyTrend();
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
 </script>
