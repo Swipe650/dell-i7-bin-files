@@ -11,12 +11,12 @@ import json
 import os
 import pylast
 import keyring
+import signal
+import sys
 from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
-import signal
-import sys
 
 # ------------------------- CONFIGURATION -------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -661,6 +661,24 @@ def api_monthly_report():
         "hour_counts": hour_counts
     })
 
+# ----- DELETE SCROBBLE ENDPOINT -----
+@app.route('/api/scrobble/<int:scrobble_id>', methods=['DELETE'])
+def delete_scrobble(scrobble_id):
+    try:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("DELETE FROM scrobbles WHERE id = ?", (scrobble_id,))
+        conn.commit()
+        deleted = c.rowcount > 0
+        conn.close()
+        if deleted:
+            print(f"🗑️ Deleted scrobble id {scrobble_id}")
+            return jsonify({"status": "deleted"})
+        else:
+            return jsonify({"error": "Scrobble not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
     with session["lock"]:
@@ -1006,6 +1024,20 @@ SCROBBLES_TEMPLATE = """
         .artist-name { font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px; }
         .album-name { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .scrobble-date { flex-shrink: 0; font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 120px; }
+        .delete-scrobble {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            color: var(--text-secondary);
+            padding: 0 4px;
+        }
+        .delete-scrobble:hover {
+            opacity: 1;
+            color: var(--accent);
+        }
         .pagination { display: flex; justify-content: center; gap: 1rem; margin-top: 2rem; align-items: center; }
         .pagination button { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s; color: var(--text-primary); }
         .pagination button:hover:not(:disabled) { background: var(--button-hover); border-color: var(--text-muted); }
@@ -1018,6 +1050,7 @@ SCROBBLES_TEMPLATE = """
             .scrobble-date { margin-left: 64px; text-align: left; width: 100%; }
             .now-playing { flex-direction: column; text-align: center; }
             .time-stats { flex-direction: column; align-items: center; }
+            .delete-scrobble { margin-left: auto; }
         }
         canvas { max-height: 250px; width: auto; margin: 0 auto; display: block; }
         .new-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
@@ -1219,19 +1252,69 @@ SCROBBLES_TEMPLATE = """
         container.innerHTML = '<div class="empty-message">Loading...</div>';
         fetch(`/api/scrobbles?limit=${limit}&offset=${offset}`).then(r => r.json()).then(data => {
             if (!data.scrobbles.length) { container.innerHTML = '<div class="empty-message">✨ No scrobbles yet. Start listening!</div>'; return; }
-            container.innerHTML = data.scrobbles.map(s => `
-                <div class="scrobble-item">
-                    <img class="album-art" src="${escapeHtml(s.art_url || 'https://via.placeholder.com/56?text=🎵')}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
+            renderScrobbles(data.scrobbles);
+            renderPagination(data.total, offset);
+        }).catch(e => { console.error(e); container.innerHTML = '<div class="empty-message">Error loading scrobbles.</div>'; });
+    }
+
+    function renderScrobbles(scrobbles) {
+        const container = document.getElementById('scrobbleList');
+        let html = '';
+        for (let s of scrobbles) {
+            const artUrl = s.art_url || 'https://via.placeholder.com/56?text=🎵';
+            const dateStr = formatRelativeTime(s.timestamp);
+            html += `
+                <div class="scrobble-item" data-id="${s.id}">
+                    <img class="album-art" src="${escapeHtml(artUrl)}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
                     <div class="track-info">
                         <div class="track-name">${escapeHtml(s.track)}</div>
                         <div class="artist-name">${escapeHtml(s.artist)}</div>
                         <div class="album-name">${escapeHtml(s.album || '')}</div>
                     </div>
-                    <div class="scrobble-date">${formatRelativeTime(s.timestamp)}</div>
+                    <div class="scrobble-date">${dateStr}</div>
+                    <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
                 </div>
-            `).join('');
-            renderPagination(data.total, offset);
-        }).catch(e => { console.error(e); container.innerHTML = '<div class="empty-message">Error loading scrobbles.</div>'; });
+            `;
+        }
+        container.innerHTML = html;
+        attachDeleteHandlers();
+    }
+
+    function attachDeleteHandlers() {
+        document.querySelectorAll('.delete-scrobble').forEach(btn => {
+            btn.removeEventListener('click', btn._listener);
+            const listener = (e) => {
+                e.stopPropagation();
+                const row = btn.closest('.scrobble-item');
+                deleteScrobble(btn.dataset.id, row);
+            };
+            btn.addEventListener('click', listener);
+            btn._listener = listener;
+        });
+    }
+
+    async function deleteScrobble(scrobbleId, rowElement) {
+        if (!confirm("Are you sure you want to delete this scrobble? This cannot be undone.")) return;
+        try {
+            const response = await fetch(`/api/scrobble/${scrobbleId}`, { method: 'DELETE' });
+            const data = await response.json();
+            if (response.ok) {
+                rowElement.remove();
+                fetchStats();
+                fetchListeningTime();
+                // Optionally refresh other stats that depend on total scrobbles
+                fetchListeningClock();
+                fetchWeekdayStats();
+                fetchTopArtistsByTime();
+                fetchLongestDay();
+                fetchTopPlaylists();
+            } else {
+                alert(`Error: ${data.error}`);
+            }
+        } catch (err) {
+            console.error("Delete failed:", err);
+            alert("Failed to delete scrobble");
+        }
     }
 
     function formatRelativeTime(timestamp) {
@@ -1502,11 +1585,11 @@ MONTHLY_TEMPLATE = """
 </html>
 """
 
+# ------------------------- MAIN -------------------------
 def signal_handler(sig, frame):
     print("\n👋 Goodbye!")
     sys.exit(0)
 
-# ------------------------- MAIN -------------------------
 if __name__ == '__main__':
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
