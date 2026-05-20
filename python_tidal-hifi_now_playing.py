@@ -569,7 +569,7 @@ def api_longest_listening_day():
         FROM scrobbles
         GROUP BY day
         ORDER BY scrobble_count DESC
-        LIMIT 5
+        LIMIT 10
     """)
     rows = c.fetchall()
     conn.close()
@@ -1127,7 +1127,7 @@ SCROBBLES_TEMPLATE = """
             <ul class="stat-list" id="topArtistsTimeList"><li>Loading...</li></ul>
         </div>
         <div class="stat-card">
-            <h3>🏆 Top 5 Listening Days</h3>
+            <h3>🏆 Top 10 Listening Days</h3>
             <ul class="stat-list" id="topDaysList">
                 <li>Loading...</li>
             </ul>
@@ -1498,7 +1498,8 @@ MONTHLY_TEMPLATE = """
         .stat-list::-webkit-scrollbar { width: 6px; }
         .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
         .stat-list::-webkit-scrollbar-thumb { background: #aaa; border-radius: 3px; }
-        body.dark .stat-list::-webkit-scrollbar-thumb { background: #aaa; }
+        body.dark .stat-list::-webkit-scrollbar-thumb { background: #aaa; .top-days-list {
+        max-height: 400px;}        
         canvas { max-height: 300px; margin-top: 1rem; }
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
     </style>
