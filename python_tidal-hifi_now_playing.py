@@ -905,6 +905,15 @@ SCROBBLES_TEMPLATE = """
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='grad' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23e0e0e0'/%3E%3Cstop offset='70%25' stop-color='%23a0a0a0'/%3E%3Cstop offset='100%25' stop-color='%23404040'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23grad)' stroke='%23333' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23333'/%3E%3C/svg%3E">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
+        body.dark .theme-toggle {
+            background: #3a3a3a;
+            border-color: #666;
+            color: #ffffff;
+        }
+        body.dark .theme-toggle:hover {
+            background: #555;
+            border-color: #888;
+        }
         :root {
             --bg-body: #ececec;
             --bg-card: #f5f5f5;
