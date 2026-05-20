@@ -122,6 +122,9 @@ def init_db():
     conn.close()
     migrate_db()
     migrate_genre_db()
+    migrate_album_genre_db()
+    migrate_artist_genre_db()
+    migrate_album_genre_db()
 
 def migrate_db():
     conn = sqlite3.connect(DATABASE)
@@ -145,6 +148,40 @@ def migrate_genre_db():
     c.execute('''CREATE TABLE IF NOT EXISTS playlist_genre_map (
         playlist_name TEXT PRIMARY KEY,
         genre TEXT NOT NULL
+    )''')
+    conn.commit()
+    conn.close()
+
+def migrate_album_genre_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS album_genre_map (
+        album TEXT,
+        artist TEXT,
+        genre TEXT NOT NULL,
+        PRIMARY KEY (album, artist)
+    )''')
+    conn.commit()
+    conn.close()
+
+def migrate_artist_genre_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS artist_genre_map (
+        artist TEXT PRIMARY KEY,
+        genre TEXT NOT NULL
+    )''')
+    conn.commit()
+    conn.close()
+
+def migrate_album_genre_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS album_genre_map (
+        album TEXT,
+        artist TEXT,
+        genre TEXT NOT NULL,
+        PRIMARY KEY (album, artist)
     )''')
     conn.commit()
     conn.close()
@@ -616,7 +653,7 @@ def api_top_genres():
         WHERE genre IS NOT NULL AND genre != ''
         GROUP BY genre
         ORDER BY count DESC
-        LIMIT 10
+        LIMIT 25
     """)
     rows = c.fetchall()
     conn.close()
@@ -901,6 +938,72 @@ def api_backfill_genres():
     conn.close()
     return jsonify({"status": "ok", "updated": updated})
 
+@app.route('/api/set_artist_genre', methods=['POST'])
+def api_set_artist_genre():
+    data = request.get_json()
+    artist = data.get('artist')
+    genre = data.get('genre')
+    if not artist:
+        return jsonify({"error": "Missing artist name"}), 400
+    if not genre:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("DELETE FROM artist_genre_map WHERE artist = ?", (artist,))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "removed"})
+    else:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO artist_genre_map (artist, genre) VALUES (?, ?)", (artist, genre))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "saved"})
+
+@app.route('/api/set_album_genre', methods=['POST'])
+def api_set_album_genre():
+    data = request.get_json()
+    album = data.get('album')
+    artist = data.get('artist')
+    genre = data.get('genre')
+    if not album or not artist:
+        return jsonify({"error": "Missing album or artist"}), 400
+    if not genre:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("DELETE FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "removed"})
+    else:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO album_genre_map (album, artist, genre) VALUES (?, ?, ?)", (album, artist, genre))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "saved"})
+
+@app.route('/api/backfill_album_genres', methods=['POST'])
+def api_backfill_album_genres():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        UPDATE scrobbles
+        SET genre = (
+            SELECT genre FROM album_genre_map
+            WHERE album_genre_map.album = scrobbles.album
+              AND album_genre_map.artist = scrobbles.artist
+        )
+        WHERE EXISTS (
+            SELECT 1 FROM album_genre_map
+            WHERE album = scrobbles.album AND artist = scrobbles.artist
+        )
+    """)
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "updated": updated})
+
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -912,8 +1015,8 @@ HTML_TEMPLATE = """
     <style>
         body { margin:0; font-family:-apple-system; color:white; overflow:hidden; }
         .bg { position:fixed; width:100%; height:100%; background-size:cover; filter:blur(10px) brightness(0.35); z-index:-1; transition: background-image 0.5s ease; }
-        .overlay { display:flex; height:100vh; align-items:center; justify-content:center; }
-        .card { display:flex; gap:40px; background:rgba(0,0,0,0.4); padding:30px; border-radius:20px; backdrop-filter:blur(20px); max-width:90vw; }
+        .overlay { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; }
+        .card { display:flex; gap:40px; background:rgba(0,0,0,0.4); padding:30px; border-radius:20px; backdrop-filter:blur(20px); max-width:90vw; margin-bottom:20px; }
         .art { width:260px; border-radius:16px; }
         .info { display:flex; flex-direction:column; justify-content:center; min-width: 400px; flex: 1; }
         .track { font-size:2em; word-break:break-word; }
@@ -926,6 +1029,32 @@ HTML_TEMPLATE = """
         .controls { margin-top:20px; display:flex; gap:20px; flex-wrap: wrap; }
         .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; transition: background-color 0.2s ease; }
         .btn:hover { background:rgba(255,255,255,0.25); }
+        .tag-bar {
+            background: rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
+            border-radius: 40px;
+            padding: 8px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+        .tag-bar strong { font-weight: 600; margin-right: 4px; }
+        .tag-bar .btn-sm {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            transition: background 0.2s;
+        }
+        .tag-bar .btn-sm:hover { background: rgba(255,255,255,0.3); }
+        .tag-item { display: inline-flex; align-items: center; gap: 8px; }
         .meta { margin-top:10px; font-size:0.85em; color:#bbb; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         .quality-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; background: rgba(255,255,255,0.1); }
         .bitrate { font-size:0.95em; font-family: monospace; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; }
@@ -943,6 +1072,8 @@ HTML_TEMPLATE = """
             .info { min-width: 280px; }
             .meta { flex-direction: column; gap: 5px; text-align: center; }
             .controls { justify-content: center; }
+            .tag-bar { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 12px; gap: 10px; }
+            .tag-item { justify-content: space-between; }
         }
     </style>
 </head>
@@ -974,11 +1105,24 @@ HTML_TEMPLATE = """
                 </div>
             </div>
         </div>
+        <!-- Compact tag bar -->
+        <div class="tag-bar">
+            <div class="tag-item">
+                <strong>Artist:</strong> <span id="currentArtistForTag">-</span>
+                <button id="tagArtistBtn" class="btn-sm">🏷️ Tag Genre</button>
+            </div>
+            <div class="tag-item">
+                <strong>Album:</strong> <span id="currentAlbumForTag">-</span>
+                <button id="tagAlbumBtn" class="btn-sm">🏷️ Tag Genre</button>
+            </div>
+        </div>
     </div>
 <script>
 const socket = io({ reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000 });
 let trackDurationSec = 0;
 const artCache = new Map();
+let currentArtist = "";
+let currentAlbum = "";
 
 function updateArt(url) {
     if (!url) return;
@@ -1013,6 +1157,13 @@ function getBitrateText(quality, bitDepth, sampleRate, badgeText) {
 function toggleShuffle() { fetch('/toggle_shuffle', { method: 'POST' }); }
 function toggleRepeat() { fetch('/toggle_repeat', { method: 'POST' }); }
 
+function updateTaggingInfo(data) {
+    currentArtist = data.artist;
+    currentAlbum = data.album;
+    document.getElementById('currentArtistForTag').innerText = currentArtist || "-";
+    document.getElementById('currentAlbumForTag').innerText = currentAlbum || "-";
+}
+
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
@@ -1034,6 +1185,7 @@ function updateUI(data) {
     document.getElementById('page-title').innerText = `${data.artist} - ${data.track}`;
     document.getElementById('favicon').href = data.art;
     trackDurationSec = data.duration_sec || trackDurationSec;
+    updateTaggingInfo(data);
 }
 
 socket.on('update', (data) => updateUI(data));
@@ -1046,6 +1198,50 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
     const percent = (e.clientX - rect.left) / rect.width;
     fetch(`/seek/${Math.floor(percent * trackDurationSec)}`, { method: 'PUT' });
 });
+
+// Tagging functions
+function tagArtist() {
+    if (!currentArtist) {
+        alert("No artist playing.");
+        return;
+    }
+    const genre = prompt("Enter genre for artist:", "");
+    if (genre === null) return;
+    fetch('/api/set_artist_genre', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist: currentArtist, genre: genre })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) alert("Error: " + data.error);
+        else alert(`Genre "${genre}" saved for artist "${currentArtist}".`);
+    })
+    .catch(e => alert("Request failed: " + e));
+}
+
+function tagAlbum() {
+    if (!currentAlbum || !currentArtist) {
+        alert("No album playing.");
+        return;
+    }
+    const genre = prompt("Enter genre for album:", "");
+    if (genre === null) return;
+    fetch('/api/set_album_genre', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ album: currentAlbum, artist: currentArtist, genre: genre })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) alert("Error: " + data.error);
+        else alert(`Genre "${genre}" saved for album "${currentAlbum}".`);
+    })
+    .catch(e => alert("Request failed: " + e));
+}
+
+document.getElementById('tagArtistBtn').addEventListener('click', tagArtist);
+document.getElementById('tagAlbumBtn').addEventListener('click', tagAlbum);
 </script>
 </body>
 </html>
