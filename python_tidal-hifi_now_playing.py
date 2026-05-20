@@ -779,6 +779,35 @@ def api_monthly_trend():
     conn.close()
     return jsonify([{"month": row[0], "scrobbles": row[1]} for row in rows])
 
+@app.route('/api/playlists')
+def api_playlists():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT playlist FROM scrobbles WHERE playlist IS NOT NULL AND playlist != '' ORDER BY playlist")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([row[0] for row in rows])
+
+@app.route('/api/rename_playlist', methods=['POST'])
+def api_rename_playlist():
+    data = request.get_json()
+    old_name = data.get('old_name')
+    new_name = data.get('new_name')
+    if not old_name or not new_name:
+        return jsonify({"error": "Missing old_name or new_name"}), 400
+    if old_name == new_name:
+        return jsonify({"status": "no change"})
+    try:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("UPDATE scrobbles SET playlist = ? WHERE playlist = ?", (new_name, old_name))
+        conn.commit()
+        updated = c.rowcount
+        conn.close()
+        return jsonify({"status": "ok", "updated": updated})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -1498,8 +1527,34 @@ MONTHLY_TEMPLATE = """
         .stat-list::-webkit-scrollbar { width: 6px; }
         .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
         .stat-list::-webkit-scrollbar-thumb { background: #aaa; border-radius: 3px; }
-        body.dark .stat-list::-webkit-scrollbar-thumb { background: #aaa; .top-days-list {
-        max-height: 400px;}        
+        body.dark .stat-list::-webkit-scrollbar-thumb { background: #aaa; }
+        .playlist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-card);
+        }
+        .playlist-name {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-right: 1rem;
+        }
+        .edit-playlist-btn {
+            background: var(--button-bg);
+            border: 1px solid var(--button-border);
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+            color: var(--text-primary);
+        }
+        .edit-playlist-btn:hover {
+            background: var(--button-hover);
+        }
         canvas { max-height: 300px; margin-top: 1rem; }
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
     </style>
@@ -1536,7 +1591,19 @@ MONTHLY_TEMPLATE = """
             <canvas id="clockChart" width="100%" height="250"></canvas>
         </div>
     </div>
+
     <div id="loadingMsg" style="text-align: center; padding: 2rem;">Select a month and click Generate Report.</div>
+
+    <!-- Playlist Renaming Tool -->
+    <div class="table-card" style="margin-top: 2rem;">
+        <h3>📀 Rename Playlists</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Edit any playlist name – all past scrobbles will be updated.</p>
+        <div id="playlistList" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-message">Loading playlists...</div>
+        </div>
+    </div>
+
+    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
 
 <script>
@@ -1634,6 +1701,58 @@ MONTHLY_TEMPLATE = """
         if (!str) return '';
         return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
     }
+
+    // Playlist functions
+    let currentPlaylists = [];
+
+    function loadPlaylists() {
+        const container = document.getElementById('playlistList');
+        container.innerHTML = '<div class="empty-message">Loading playlists...</div>';
+        fetch('/api/playlists')
+            .then(r => r.json())
+            .then(data => {
+                currentPlaylists = data;
+                if (data.length === 0) {
+                    container.innerHTML = '<div class="empty-message">No playlists found in scrobbles.</div>';
+                } else {
+                    let html = '';
+                    data.forEach(playlist => {
+                        html += `
+                            <div class="playlist-item" data-oldname="${escapeHtml(playlist)}">
+                                <span class="playlist-name">${escapeHtml(playlist)}</span>
+                                <button class="edit-playlist-btn" onclick="renamePlaylist('${escapeHtml(playlist).replace(/'/g, "\\'")}')">✏️ Rename</button>
+                            </div>
+                        `;
+                    });
+                    container.innerHTML = html;
+                }
+            })
+            .catch(e => {
+                console.error(e);
+                container.innerHTML = '<div class="empty-message">Error loading playlists.</div>';
+            });
+    }
+
+    function renamePlaylist(oldName) {
+        const newName = prompt('Enter new name for playlist:', oldName);
+        if (!newName || newName === oldName) return;
+        fetch('/api/rename_playlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_name: oldName, new_name: newName })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                alert('Error: ' + data.error);
+            } else {
+                alert(`Renamed "${oldName}" to "${newName}" (${data.updated} scrobble(s) updated).`);
+                loadPlaylists();  // refresh list
+                // Optionally, if the monthly report uses playlists, you could reload it too.
+            }
+        })
+        .catch(e => alert('Request failed: ' + e));
+    }
     
     const now = new Date();
     document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -1642,6 +1761,7 @@ MONTHLY_TEMPLATE = """
     if (localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
     
     loadReport();
+    loadPlaylists();   // load playlist renaming tool
 </script>
 </body>
 </html>
