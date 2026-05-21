@@ -2330,7 +2330,7 @@ MONTHLY_TEMPLATE = """
             <div style="flex: 1; min-width: 150px;"><label>Artist</label><input type="text" id="searchArtist" placeholder="Artist name" style="width:100%;"></div>
             <div style="flex: 1; min-width: 150px;"><label>Album</label><input type="text" id="searchAlbum" placeholder="Album name" style="width:100%;"></div>
             <div style="flex: 1; min-width: 120px;"><label>Genre</label><select id="searchGenre" style="width:100%;"><option value="">All</option></select></div>
-            <div style="flex: 1; min-width: 120px;"><label>Playlist</label><input type="text" id="searchPlaylist" placeholder="Playlist name" style="width:100%;"></div>
+            <div style="flex: 1; min-width: 120px;"><label>Playlist</label><select id="searchPlaylist" style="width:100%;"><option value="">All</option></select></div>
             <div style="flex: 1; min-width: 130px;"><label>Start Date</label><input type="date" id="searchStartDate" style="width:100%;"></div>
             <div style="flex: 1; min-width: 130px;"><label>End Date</label><input type="date" id="searchEndDate" style="width:100%;"></div>
             <div><button id="searchScrobblesBtn" class="backfill-btn" style="background: var(--accent);">Search</button><button id="clearSearchBtn" class="backfill-btn" style="background: #6c757d; margin-left:5px;">Clear</button></div>
@@ -2652,7 +2652,32 @@ function searchArtists() {
             resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
         });
 }
-
+        
+        function loadPlaylistDropdown() {
+            console.log("Loading playlist dropdown...");
+            fetch('/api/playlists')
+                .then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    return r.json();
+                })
+                .then(playlists => {
+                    console.log("Playlists received:", playlists);
+                    const select = document.getElementById('searchPlaylist');
+                    if (!select) {
+                        console.error("Element with id 'searchPlaylist' not found!");
+                        return;
+                    }
+                    select.innerHTML = '<option value="">All</option>';
+                    playlists.forEach(playlist => {
+                        const option = document.createElement('option');
+                        option.value = playlist;
+                        option.textContent = playlist;
+                        select.appendChild(option);
+                    });
+                })
+                .catch(err => console.error("Error loading playlists:", err));
+        }
+        
         function saveArtistGenre(artist, genre) {
             console.log(`Saving genre for artist: ${artist}, genre: ${genre}`);
             fetch('/api/set_artist_genre', {
@@ -2714,20 +2739,27 @@ function searchArtists() {
             genres.forEach(g => { const opt = document.createElement('option'); opt.value = g; opt.textContent = g; select.appendChild(opt); });
         }).catch(e=>console.error(e));
     }
+
     function searchScrobbles() {
-        const params = new URLSearchParams();
-        const track = document.getElementById('searchTrack').value.trim(); if(track) params.append('track', track);
-        const artist = document.getElementById('searchArtist').value.trim(); if(artist) params.append('artist', artist);
-        const album = document.getElementById('searchAlbum').value.trim(); if(album) params.append('album', album);
-        const genre = document.getElementById('searchGenre').value; if(genre) params.append('genre', genre);
-        const playlist = document.getElementById('searchPlaylist').value.trim(); if(playlist) params.append('playlist', playlist);
-        const startDate = document.getElementById('searchStartDate').value; if(startDate) params.append('start_date', startDate);
-        const endDate = document.getElementById('searchEndDate').value; if(endDate) params.append('end_date', endDate);
-        params.append('limit', 100);
-        const resultsDiv = document.getElementById('searchResults');
-        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
-        fetch(`/api/search_scrobbles?${params.toString()}`).then(r=>r.json()).then(data=>{
-            if(data.length===0) { resultsDiv.innerHTML = '<div class="empty-message">No scrobbles found.</div>'; return; }
+    const params = new URLSearchParams();
+    const track = document.getElementById('searchTrack').value.trim(); if (track) params.append('track', track);
+    const artist = document.getElementById('searchArtist').value.trim(); if (artist) params.append('artist', artist);
+    const album = document.getElementById('searchAlbum').value.trim(); if (album) params.append('album', album);
+    const genre = document.getElementById('searchGenre').value; if (genre) params.append('genre', genre);
+    const playlist = document.getElementById('searchPlaylist').value; if (playlist) params.append('playlist', playlist);
+    const startDate = document.getElementById('searchStartDate').value; if (startDate) params.append('start_date', startDate);
+    const endDate = document.getElementById('searchEndDate').value; if (endDate) params.append('end_date', endDate);
+    params.append('limit', 100);
+
+    const resultsDiv = document.getElementById('searchResults');
+    resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+    fetch(`/api/search_scrobbles?${params.toString()}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.length === 0) {
+                resultsDiv.innerHTML = '<div class="empty-message">No scrobbles found.</div>';
+                return;
+            }
             let html = '<div class="scrobble-list">';
             data.forEach(s => {
                 const artUrl = s.art_url || 'https://via.placeholder.com/56?text=🎵';
@@ -2746,8 +2778,12 @@ function searchArtists() {
             html += '</div>';
             resultsDiv.innerHTML = html;
             attachDeleteHandlersToSearch();
-        }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching scrobbles.</div>'; });
-    }
+        })
+        .catch(e => {
+            console.error(e);
+            resultsDiv.innerHTML = '<div class="empty-message">Error searching scrobbles.</div>';
+        });
+}
     function attachDeleteHandlersToSearch() {
         document.querySelectorAll('#searchResults .delete-scrobble').forEach(btn => {
             btn.removeEventListener('click', btn._listener);
@@ -2806,6 +2842,7 @@ function searchArtists() {
     loadGenreMappings();
     loadTrendChart();
     loadGenreList();
+    loadPlaylistDropdown();
     loadSearchGenres();
 </script>
 </body>
