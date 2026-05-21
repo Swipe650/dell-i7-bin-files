@@ -464,38 +464,43 @@ def background_poller():
             with session["lock"]:
                 if track_changed and session["last_track_data"]:
                     if maybe_scrobble(session["last_track_data"], session["max_position"], session["last_track_data"]["duration_sec"]):
-                            ld = session["last_track_data"]
-                            playlist_name = ld.get("playlist_name")   # use stored playlist name from track start
-                            add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
-                                    ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
-                            session["track_start_time"] = time.time()
-                            session["max_position"] = 0
-                            session["last_track_data"] = None
+                        ld = session["last_track_data"]
+                        playlist_name = ld.get("playlist_name")
+                        add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
+                                     ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
+                    # --- FIX: ALWAYS reset, not just when scrobbled ---
+                    session["track_start_time"] = time.time()
+                    session["max_position"] = 0
+                    session["last_track_data"] = None
                 if track_changed or not session["last_track_data"]:
-                            track_start_timestamp = int(time.time())
-                            session["track_start_timestamp"] = track_start_timestamp
-                            # Compute playlist name at track start
-                            playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-                            album_name = current_track_data.get("album", "")
-                            playlist_name_at_start = playing_from if playing_from != album_name else None
-                            # Ignore "Unknown" or empty playlist names
-                            if playlist_name_at_start and playlist_name_at_start.strip().lower() == "unknown":
-                                playlist_name_at_start = None
-                            session["last_track_data"] = {
-                                "track": title, "artist": meta["artist"], "album": meta["album"],
-                                "playlist_name": playlist_name_at_start,
-                                "art_url": current_track_data.get("art", ""), "duration_sec": meta["duration_sec"],
-                                "quality": current_track_data.get("quality", "low"),
-                                "bit_depth": current_track_data.get("bitDepth", 0),
-                                "sample_rate": current_track_data.get("sampleRate", 0),
-                                "codec": current_track_data.get("codec", ""),
-                                "start_timestamp": track_start_timestamp
-                            }
-                            session["track_start_time"] = time.time()
-                            session["max_position"] = 0
-                            last_title = title
-                            if network:
-                                update_now_playing(network, meta["artist"], title, meta["album"])
+                    track_start_timestamp = int(time.time())
+                    session["track_start_timestamp"] = track_start_timestamp
+                    playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+                    album_name = current_track_data.get("album", "")
+                    playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+                    album_name = current_track_data.get("album", "")
+                    playlist_name_at_start = playing_from if playing_from != album_name else None
+                    # Apply IGNORED_PLAYLISTS
+                    if playlist_name_at_start and playlist_name_at_start in IGNORED_PLAYLISTS:
+                        playlist_name_at_start = None
+                    # Also keep the "unknown" check
+                    if playlist_name_at_start and playlist_name_at_start.strip().lower() == "unknown":
+                        playlist_name_at_start = None
+                    session["last_track_data"] = {
+                        "track": title, "artist": meta["artist"], "album": meta["album"],
+                        "playlist_name": playlist_name_at_start,
+                        "art_url": current_track_data.get("art", ""), "duration_sec": meta["duration_sec"],
+                        "quality": current_track_data.get("quality", "low"),
+                        "bit_depth": current_track_data.get("bitDepth", 0),
+                        "sample_rate": current_track_data.get("sampleRate", 0),
+                        "codec": current_track_data.get("codec", ""),
+                        "start_timestamp": track_start_timestamp
+                    }
+                    session["track_start_time"] = time.time()
+                    session["max_position"] = 0
+                    last_title = title
+                    if network:
+                        update_now_playing(network, meta["artist"], title, meta["album"])
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
@@ -523,7 +528,6 @@ def background_poller():
                 session["last_track_data"]["codec"] = current_track_data.get("codec", session["last_track_data"]["codec"])
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
-
 
 
 # ------------------------- FLASK ROUTES -------------------------
@@ -1767,6 +1771,11 @@ SCROBBLES_TEMPLATE = """
             <h3>🏷️ Top Genres</h3>
             <ul class="stat-list" id="topGenresList"><li>Loading...</li></ul>
         </div>
+        <!-- New Genre Distribution pie chart -->
+        <div class="stat-card">
+            <h3>🥧 Genre Distribution</h3>
+            <canvas id="genrePieChart" width="300" height="200"></canvas>
+        </div>
     </div>
 
     <div class="tools">
@@ -1787,6 +1796,8 @@ SCROBBLES_TEMPLATE = """
 </div>
 
 <script>
+    let genreChart = null;  // for the pie chart
+
     function setTheme(theme) {
         if (theme === 'dark') { document.body.classList.add('dark'); } else { document.body.classList.remove('dark'); }
         localStorage.setItem('scrobbleTheme', theme);
@@ -1863,28 +1874,28 @@ SCROBBLES_TEMPLATE = """
     }
 
     function fetchWeekdayStats() {
-    fetch('/api/scrobbles_by_weekday').then(r => r.json()).then(data => {
-        const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-        const orderedData = dayOrder.map(day => { const found = data.find(d => d.day === day); return found ? found.count : 0; });
-        new Chart(document.getElementById('weekdayChart').getContext('2d'), {
-            type: 'bar', 
-            data: { 
-                labels: dayOrder, 
-                datasets: [{ 
-                    label: 'Scrobbles', 
-                    data: orderedData, 
-                    backgroundColor: '#36a2eb', 
-                    borderRadius: 4 
-                }] 
-            },
-            options: { 
-                responsive: true, 
-                scales: { y: { beginAtZero: true } },
-                plugins: { legend: { display: false } }
-            }
-        });
-    }).catch(e => console.error('Weekday stats error:', e));
-}
+        fetch('/api/scrobbles_by_weekday').then(r => r.json()).then(data => {
+            const dayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            const orderedData = dayOrder.map(day => { const found = data.find(d => d.day === day); return found ? found.count : 0; });
+            new Chart(document.getElementById('weekdayChart').getContext('2d'), {
+                type: 'bar', 
+                data: { 
+                    labels: dayOrder, 
+                    datasets: [{ 
+                        label: 'Scrobbles', 
+                        data: orderedData, 
+                        backgroundColor: '#36a2eb', 
+                        borderRadius: 4 
+                    }] 
+                },
+                options: { 
+                    responsive: true, 
+                    scales: { y: { beginAtZero: true } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }).catch(e => console.error('Weekday stats error:', e));
+    }
 
     function fetchTopArtistsByTime() {
         fetch('/api/top_artists_by_time').then(r => r.json()).then(data => {
@@ -1931,6 +1942,52 @@ SCROBBLES_TEMPLATE = """
                 }
             })
             .catch(e => console.error('Top genres error:', e));
+    }
+
+    // New function: fetch genre distribution for pie chart
+    function fetchGenreDistribution() {
+        fetch('/api/top_genres')
+            .then(r => r.json())
+            .then(data => {
+                const ctx = document.getElementById('genrePieChart').getContext('2d');
+                if (genreChart) genreChart.destroy();
+                if (data.length === 0) {
+                    // Hide chart and show message
+                    ctx.canvas.parentElement.innerHTML = '<div class="empty-message">No genre data yet</div>';
+                    return;
+                }
+                // Prepare data: top 9, rest as "Other"
+                let topData = data.slice(0, 9);
+                let otherCount = data.slice(9).reduce((sum, g) => sum + g.count, 0);
+                let labels = topData.map(g => g.genre);
+                let counts = topData.map(g => g.count);
+                if (otherCount > 0) {
+                    labels.push('Other');
+                    counts.push(otherCount);
+                }
+                genreChart = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: counts,
+                            backgroundColor: [
+                                '#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff',
+                                '#ff9f40', '#c9cbcf', '#7c4dff', '#b0bec5', '#ff7043'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'right' },
+                            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw} scrobbles` } }
+                        }
+                    }
+                });
+            })
+            .catch(e => console.error('Genre distribution error:', e));
     }
 
     let currentOffset = 0; const limit = 25;
@@ -1995,6 +2052,7 @@ SCROBBLES_TEMPLATE = """
                 fetchTopDays();
                 fetchTopPlaylists();
                 fetchTopGenres();
+                fetchGenreDistribution();  // refresh pie chart
             } else {
                 alert(`Error: ${data.error}`);
             }
@@ -2025,7 +2083,7 @@ SCROBBLES_TEMPLATE = """
     }
     function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
-    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchTopGenres(); }).catch(e => alert('Import failed: ' + e)); }
+    function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchTopGenres(); fetchGenreDistribution(); }).catch(e => alert('Import failed: ' + e)); }
 
     fetchNowPlaying();
     fetchStats();
@@ -2036,6 +2094,7 @@ SCROBBLES_TEMPLATE = """
     fetchTopDays();
     fetchTopPlaylists();
     fetchTopGenres();
+    fetchGenreDistribution();  // initial load
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
 </script>
