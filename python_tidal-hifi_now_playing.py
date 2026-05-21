@@ -523,6 +523,10 @@ def background_poller():
 
 
 # ------------------------- FLASK ROUTES -------------------------
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204   # returns no content
+
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -1095,7 +1099,7 @@ def api_set_playlist_genre():
         # Delete mapping
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
-        c.execute("DELETE FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
+        c.execute("UPDATE scrobbles SET genre = ? WHERE playlist = ?", (genre, playlist))
         conn.commit()
         conn.close()
         return jsonify({"status": "removed"})
@@ -1132,20 +1136,25 @@ def api_set_artist_genre():
     genre = data.get('genre')
     if not artist:
         return jsonify({"error": "Missing artist name"}), 400
+    
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
     if not genre:
-        conn = sqlite3.connect(DATABASE)
-        c = conn.cursor()
+        # Delete mapping
         c.execute("DELETE FROM artist_genre_map WHERE artist = ?", (artist,))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "removed"})
+        # Optionally clear genre from existing scrobbles (or leave them as is)
+        # To keep consistency, you may set genre = NULL for this artist
+        c.execute("UPDATE scrobbles SET genre = NULL WHERE artist = ?", (artist,))
     else:
-        conn = sqlite3.connect(DATABASE)
-        c = conn.cursor()
+        # Insert or replace mapping
         c.execute("INSERT OR REPLACE INTO artist_genre_map (artist, genre) VALUES (?, ?)", (artist, genre))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "saved"})
+        # Immediately backfill all existing scrobbles of this artist
+        c.execute("UPDATE scrobbles SET genre = ? WHERE artist = ?", (genre, artist))
+    
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "saved"})
 
 @app.route('/api/artist_genre_map')
 def api_artist_genre_map():
