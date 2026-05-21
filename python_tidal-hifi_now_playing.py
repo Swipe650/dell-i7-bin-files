@@ -1168,6 +1168,15 @@ def api_search_artists():
     conn.close()
     return jsonify([row[0] for row in rows])
 
+@app.route('/api/album_genre_map')
+def api_album_genre_map():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT artist, album, genre FROM album_genre_map ORDER BY artist, album")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"artist": row[0], "album": row[1], "genre": row[2]} for row in rows])
+
 @app.route('/api/search_albums', methods=['GET'])
 def api_search_albums():
     query = request.args.get('q', '')
@@ -1175,8 +1184,6 @@ def api_search_albums():
         return jsonify([])
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    # Search for albums where album name contains query, return distinct artist, album
-    # Order by album name
     c.execute("SELECT DISTINCT artist, album FROM scrobbles WHERE album IS NOT NULL AND album != '' AND album LIKE ? ORDER BY album LIMIT 50", (f'%{query}%',))
     rows = c.fetchall()
     conn.close()
@@ -2440,34 +2447,61 @@ MONTHLY_TEMPLATE = """
         document.getElementById('albumSearchInput').value = '';
         document.getElementById('albumSearchResults').innerHTML = '<div class="empty-message">Search for an album to assign a genre.</div>';
     }
-    function searchAlbums() {
-        const query = document.getElementById('albumSearchInput').value.trim();
-        const resultsDiv = document.getElementById('albumSearchResults');
-        if(!query) { resultsDiv.innerHTML = '<div class="empty-message">Enter an album name to search.</div>'; return; }
-        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
-        fetch(`/api/search_albums?q=${encodeURIComponent(query)}`).then(r=>r.json()).then(albums=>{
-            if(!albums.length) { resultsDiv.innerHTML = '<div class="empty-message">No albums found.</div>'; return; }
-            fetch('/api/album_genre_map').then(r=>r.json()).then(mappings=>{
-                resultsDiv.innerHTML = albums.map(album => {
-                    const key = `${album.artist}|${album.album}`;
-                    const existing = mappings.find(m => m.artist === album.artist && m.album === album.album);
-                    const genre = existing ? existing.genre : '';
-                    return `<div class="playlist-item" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">
-                        <span class="playlist-name">${escapeHtml(album.artist)} – ${escapeHtml(album.album)}</span>
-                        <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
-                        <button class="save-album-genre-btn" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">Save</button>
-                    </div>`;
-                }).join('');
-                document.querySelectorAll('.save-album-genre-btn').forEach(btn => btn.addEventListener('click', (e)=>{
-                    const artist = btn.getAttribute('data-artist');
-                    const album = btn.getAttribute('data-album');
-                    const input = btn.parentElement.querySelector('.genre-input');
-                    const genreVal = input.value.trim();
-                    saveAlbumGenre(artist, album, genreVal);
-                }));
-            });
-        }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching albums.</div>'; });
+function searchAlbums() {
+    const query = document.getElementById('albumSearchInput').value.trim();
+    const resultsDiv = document.getElementById('albumSearchResults');
+    if (!query) {
+        resultsDiv.innerHTML = '<div class="empty-message">Enter an album name to search.</div>';
+        return;
     }
+    resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+    fetch(`/api/search_albums?q=${encodeURIComponent(query)}`)
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+            return response.json();
+        })
+        .then(albums => {
+            if (!albums.length) {
+                resultsDiv.innerHTML = '<div class="empty-message">No albums found.</div>';
+                return;
+            }
+            fetch('/api/album_genre_map')
+                .then(r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status} - ${r.statusText}`);
+                    return r.json();
+                })
+                .then(mappings => {
+                    let html = '';
+                    albums.forEach(album => {
+                        const existing = mappings.find(m => m.artist === album.artist && m.album === album.album);
+                        const genre = existing ? existing.genre : '';
+                        html += `
+                            <div class="playlist-item" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">
+                                <span class="playlist-name">${escapeHtml(album.artist)} – ${escapeHtml(album.album)}</span>
+                                <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                                <button class="save-album-genre-btn" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">Save</button>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+                    document.querySelectorAll('.save-album-genre-btn').forEach(btn => btn.addEventListener('click', (e) => {
+                        const artist = btn.getAttribute('data-artist');
+                        const album = btn.getAttribute('data-album');
+                        const input = btn.parentElement.querySelector('.genre-input');
+                        const genreVal = input.value.trim();
+                        saveAlbumGenre(artist, album, genreVal);
+                    }));
+                })
+                .catch(err => {
+                    console.error("Error fetching album genre map:", err);
+                    resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`;
+                });
+        })
+        .catch(err => {
+            console.error("Album search error:", err);
+            resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
+        });
+}
     function saveAlbumGenre(artist, album, genre) {
         fetch('/api/set_album_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, album, genre }) })
             .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for album "${album}" saved.`); searchAlbums(); }).catch(e=>alert('Request failed: '+e));
