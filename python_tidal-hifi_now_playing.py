@@ -1162,11 +1162,36 @@ def api_search_artists():
         return jsonify([])
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    # Search for artists that contain the query (case‑insensitive)
+    # Get matching artists (distinct)
     c.execute("SELECT DISTINCT artist FROM scrobbles WHERE artist LIKE ? ORDER BY artist LIMIT 50", (f'%{query}%',))
+    artists = [row[0] for row in c.fetchall()]
+    if not artists:
+        conn.close()
+        return jsonify([])
+    # For each artist, find the most frequent genre from scrobbles
+    # Use a temporary table or a subquery with window function
+    placeholders = ','.join('?' * len(artists))
+    query_sql = f"""
+        WITH artist_genre_counts AS (
+            SELECT artist, genre, COUNT(*) as cnt
+            FROM scrobbles
+            WHERE artist IN ({placeholders}) AND genre IS NOT NULL AND genre != ''
+            GROUP BY artist, genre
+        ),
+        ranked AS (
+            SELECT artist, genre, cnt,
+                   ROW_NUMBER() OVER (PARTITION BY artist ORDER BY cnt DESC) as rn
+            FROM artist_genre_counts
+        )
+        SELECT artist, genre FROM ranked WHERE rn = 1
+    """
+    c.execute(query_sql, artists)
     rows = c.fetchall()
     conn.close()
-    return jsonify([row[0] for row in rows])
+    # Build a dict of artist -> suggestedGenre
+    suggested = {row[0]: row[1] for row in rows}
+    result = [{"artist": artist, "suggestedGenre": suggested.get(artist)} for artist in artists]
+    return jsonify(result)
 
 @app.route('/api/album_genre_map')
 def api_album_genre_map():
@@ -2429,20 +2454,22 @@ function searchArtists() {
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             return response.json();
         })
-        .then(artists => {
-            if (!artists.length) {
+        .then(artistsData => {
+            if (!artistsData.length) {
                 resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
                 return;
             }
-            // Fetch existing genre mappings
+            // Fetch explicit artist genres
             fetch('/api/artist_genre_map')
                 .then(r => r.json())
                 .then(mappings => {
                     let html = '';
-                    artists.forEach(artist => {
-                        // Case-insensitive match
-                        const existing = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
-                        const genre = existing ? existing.genre : '';
+                    artistsData.forEach(item => {
+                        const artist = item.artist;
+                        const suggested = item.suggestedGenre || '';
+                        // Check if there's an explicit mapping
+                        const existingMapping = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
+                        const genre = existingMapping ? existingMapping.genre : suggested;
                         html += `
                             <div class="playlist-item" data-artist="${escapeHtml(artist)}">
                                 <span class="playlist-name">${escapeHtml(artist)}</span>
@@ -2458,8 +2485,7 @@ function searchArtists() {
                         const listener = (e) => {
                             const artist = btn.getAttribute('data-artist');
                             const input = btn.parentElement.querySelector('.genre-input');
-                            const genreVal = input.value.trim();
-                            saveArtistGenre(artist, genreVal);
+                            saveArtistGenre(artist, input.value.trim());
                         };
                         btn.addEventListener('click', listener);
                         btn._listener = listener;
