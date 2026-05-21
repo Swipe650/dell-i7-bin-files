@@ -1168,6 +1168,20 @@ def api_search_artists():
     conn.close()
     return jsonify([row[0] for row in rows])
 
+@app.route('/api/search_albums', methods=['GET'])
+def api_search_albums():
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify([])
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    # Search for albums where album name contains query, return distinct artist, album
+    # Order by album name
+    c.execute("SELECT DISTINCT artist, album FROM scrobbles WHERE album IS NOT NULL AND album != '' AND album LIKE ? ORDER BY album LIMIT 50", (f'%{query}%',))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([{"artist": row[0], "album": row[1]} for row in rows])
+
 @app.route('/api/set_album_genre', methods=['POST'])
 def api_set_album_genre():
     data = request.get_json()
@@ -2110,7 +2124,7 @@ MONTHLY_TEMPLATE = """
             text-overflow: ellipsis;
             padding-right: 1rem;
         }
-        .edit-playlist-btn, .save-genre-btn, .save-artist-genre-btn {
+        .edit-playlist-btn, .save-genre-btn, .save-artist-genre-btn, .save-album-genre-btn {
             background: var(--button-bg);
             border: 1px solid var(--button-border);
             border-radius: 6px;
@@ -2120,10 +2134,10 @@ MONTHLY_TEMPLATE = """
             transition: all 0.2s;
             color: var(--text-primary);
         }
-        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover {
+        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover, .save-album-genre-btn:hover {
             background: var(--button-hover);
         }
-        .save-genre-btn, .save-artist-genre-btn {
+        .save-genre-btn, .save-artist-genre-btn, .save-album-genre-btn {
             background: var(--accent);
             color: white;
         }
@@ -2242,6 +2256,20 @@ MONTHLY_TEMPLATE = """
         </div>
     </div>
 
+    <!-- Album Genre Tagging Tool (new) -->
+    <div class="table-card">
+        <h3>🏷️ Tag Album by Genre</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Search for an album, then assign a genre (album genre overrides playlist genre, but is overridden by artist genre).</p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+            <input type="text" id="albumSearchInput" placeholder="Type album name..." style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+            <button id="searchAlbumBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
+            <button id="clearAlbumSearchBtn" style="background: #6c757d; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Clear</button>
+        </div>
+        <div id="albumSearchResults" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-message">Search for an album to assign a genre.</div>
+        </div>
+    </div>
+
     <!-- Browse by Genre -->
     <div class="table-card">
         <h3>🔍 Browse by Genre</h3>
@@ -2263,7 +2291,7 @@ MONTHLY_TEMPLATE = """
         <div id="genreNoData" style="display: none; text-align: center; padding: 1rem;">Select a genre and click Browse.</div>
     </div>
 
-    <!-- Search Scrobbles Card (moved below Browse by Genre) -->
+    <!-- Search Scrobbles Card -->
     <div class="table-card">
         <h3>🔍 Search Scrobbles</h3>
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
@@ -2376,6 +2404,11 @@ MONTHLY_TEMPLATE = """
     function backfillArtistGenres() { if(!confirm("Update all past scrobbles with artist genre mappings?")) return; fetch('/api/backfill_artist_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Artist backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
     function backfillAlbumGenres() { if(!confirm("Update all past scrobbles with album genre mappings?")) return; fetch('/api/backfill_album_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Album backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
 
+    // Artist genre tagging functions
+    function clearArtistSearch() {
+        document.getElementById('artistSearchInput').value = '';
+        document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
+    }
     function searchArtists() {
         const query = document.getElementById('artistSearchInput').value.trim();
         const resultsDiv = document.getElementById('artistSearchResults');
@@ -2401,14 +2434,45 @@ MONTHLY_TEMPLATE = """
         fetch('/api/set_artist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, genre }) })
             .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(e=>alert('Request failed: '+e));
     }
-    function clearArtistSearch() {
-        document.getElementById('artistSearchInput').value = '';
-        document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
+
+    // Album genre tagging functions
+    function clearAlbumSearch() {
+        document.getElementById('albumSearchInput').value = '';
+        document.getElementById('albumSearchResults').innerHTML = '<div class="empty-message">Search for an album to assign a genre.</div>';
+    }
+    function searchAlbums() {
+        const query = document.getElementById('albumSearchInput').value.trim();
+        const resultsDiv = document.getElementById('albumSearchResults');
+        if(!query) { resultsDiv.innerHTML = '<div class="empty-message">Enter an album name to search.</div>'; return; }
+        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+        fetch(`/api/search_albums?q=${encodeURIComponent(query)}`).then(r=>r.json()).then(albums=>{
+            if(!albums.length) { resultsDiv.innerHTML = '<div class="empty-message">No albums found.</div>'; return; }
+            fetch('/api/album_genre_map').then(r=>r.json()).then(mappings=>{
+                resultsDiv.innerHTML = albums.map(album => {
+                    const key = `${album.artist}|${album.album}`;
+                    const existing = mappings.find(m => m.artist === album.artist && m.album === album.album);
+                    const genre = existing ? existing.genre : '';
+                    return `<div class="playlist-item" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">
+                        <span class="playlist-name">${escapeHtml(album.artist)} – ${escapeHtml(album.album)}</span>
+                        <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                        <button class="save-album-genre-btn" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">Save</button>
+                    </div>`;
+                }).join('');
+                document.querySelectorAll('.save-album-genre-btn').forEach(btn => btn.addEventListener('click', (e)=>{
+                    const artist = btn.getAttribute('data-artist');
+                    const album = btn.getAttribute('data-album');
+                    const input = btn.parentElement.querySelector('.genre-input');
+                    const genreVal = input.value.trim();
+                    saveAlbumGenre(artist, album, genreVal);
+                }));
+            });
+        }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching albums.</div>'; });
+    }
+    function saveAlbumGenre(artist, album, genre) {
+        fetch('/api/set_album_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, album, genre }) })
+            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for album "${album}" saved.`); searchAlbums(); }).catch(e=>alert('Request failed: '+e));
     }
 
-    // Add event listener for the clear button (already inside the script)
-    document.getElementById('clearArtistSearchBtn').addEventListener('click', clearArtistSearch);
-    
     function loadGenreList() {
         fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
             const select = document.getElementById('genreSelect');
@@ -2512,7 +2576,11 @@ MONTHLY_TEMPLATE = """
     document.getElementById('backfillArtistGenresBtn').addEventListener('click', backfillArtistGenres);
     document.getElementById('backfillAlbumGenresBtn').addEventListener('click', backfillAlbumGenres);
     document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
+    document.getElementById('clearArtistSearchBtn').addEventListener('click', clearArtistSearch);
     document.getElementById('artistSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchArtists(); });
+    document.getElementById('searchAlbumBtn').addEventListener('click', searchAlbums);
+    document.getElementById('clearAlbumSearchBtn').addEventListener('click', clearAlbumSearch);
+    document.getElementById('albumSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchAlbums(); });
     document.getElementById('loadGenreBtn').addEventListener('click', browseGenre);
     document.getElementById('genreSelect').addEventListener('change', browseGenre);
     document.getElementById('searchScrobblesBtn').addEventListener('click', searchScrobbles);
