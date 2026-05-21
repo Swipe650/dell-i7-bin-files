@@ -464,34 +464,38 @@ def background_poller():
             with session["lock"]:
                 if track_changed and session["last_track_data"]:
                     if maybe_scrobble(session["last_track_data"], session["max_position"], session["last_track_data"]["duration_sec"]):
-                        ld = session["last_track_data"]
-                        playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-                        album_name = current_track_data.get("album", "")
-                        playlist_name = None
-                        if playing_from != album_name and playing_from not in IGNORED_PLAYLISTS:
-                            playlist_name = playing_from
-                        add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
-                                     ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
-                    session["track_start_time"] = time.time()
-                    session["max_position"] = 0
-                    session["last_track_data"] = None
+                            ld = session["last_track_data"]
+                            playlist_name = ld.get("playlist_name")   # use stored playlist name from track start
+                            add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
+                                    ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
+                            session["track_start_time"] = time.time()
+                            session["max_position"] = 0
+                            session["last_track_data"] = None
                 if track_changed or not session["last_track_data"]:
-                    track_start_timestamp = int(time.time())
-                    session["track_start_timestamp"] = track_start_timestamp
-                    session["last_track_data"] = {
-                        "track": title, "artist": meta["artist"], "album": meta["album"],
-                        "art_url": current_track_data.get("art", ""), "duration_sec": meta["duration_sec"],
-                        "quality": current_track_data.get("quality", "low"),
-                        "bit_depth": current_track_data.get("bitDepth", 0),
-                        "sample_rate": current_track_data.get("sampleRate", 0),
-                        "codec": current_track_data.get("codec", ""),
-                        "start_timestamp": track_start_timestamp
-                    }
-                    session["track_start_time"] = time.time()
-                    session["max_position"] = 0
-                    last_title = title
-                    if network:
-                        update_now_playing(network, meta["artist"], title, meta["album"])
+                            track_start_timestamp = int(time.time())
+                            session["track_start_timestamp"] = track_start_timestamp
+                            # Compute playlist name at track start
+                            playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+                            album_name = current_track_data.get("album", "")
+                            playlist_name_at_start = playing_from if playing_from != album_name else None
+                            # Ignore "Unknown" or empty playlist names
+                            if playlist_name_at_start and playlist_name_at_start.strip().lower() == "unknown":
+                                playlist_name_at_start = None
+                            session["last_track_data"] = {
+                                "track": title, "artist": meta["artist"], "album": meta["album"],
+                                "playlist_name": playlist_name_at_start,
+                                "art_url": current_track_data.get("art", ""), "duration_sec": meta["duration_sec"],
+                                "quality": current_track_data.get("quality", "low"),
+                                "bit_depth": current_track_data.get("bitDepth", 0),
+                                "sample_rate": current_track_data.get("sampleRate", 0),
+                                "codec": current_track_data.get("codec", ""),
+                                "start_timestamp": track_start_timestamp
+                            }
+                            session["track_start_time"] = time.time()
+                            session["max_position"] = 0
+                            last_title = title
+                            if network:
+                                update_now_playing(network, meta["artist"], title, meta["album"])
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
