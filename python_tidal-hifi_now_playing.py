@@ -933,8 +933,9 @@ def api_search_scrobbles():
         query += " AND album LIKE ?"
         params.append(f"%{album}%")
     if playlist:
-        query += " AND playlist = ?"
-        params.append(playlist)
+        # Change to partial match (LIKE)
+        query += " AND playlist LIKE ?"
+        params.append(f"%{playlist}%")
     if genre:
         query += " AND genre = ?"
         params.append(genre)
@@ -1162,14 +1163,13 @@ def api_search_artists():
         return jsonify([])
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    # Get matching artists (distinct)
+    # Get distinct artists
     c.execute("SELECT DISTINCT artist FROM scrobbles WHERE artist LIKE ? ORDER BY artist LIMIT 50", (f'%{query}%',))
     artists = [row[0] for row in c.fetchall()]
     if not artists:
         conn.close()
         return jsonify([])
     # For each artist, find the most frequent genre from scrobbles
-    # Use a temporary table or a subquery with window function
     placeholders = ','.join('?' * len(artists))
     query_sql = f"""
         WITH artist_genre_counts AS (
@@ -1188,7 +1188,6 @@ def api_search_artists():
     c.execute(query_sql, artists)
     rows = c.fetchall()
     conn.close()
-    # Build a dict of artist -> suggestedGenre
     suggested = {row[0]: row[1] for row in rows}
     result = [{"artist": artist, "suggestedGenre": suggested.get(artist)} for artist in artists]
     return jsonify(result)
@@ -2501,6 +2500,31 @@ function searchArtists() {
             resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
         });
 }
+function saveArtistGenre(artist, genre) {
+    console.log(`Saving genre for artist: ${artist}, genre: ${genre}`);
+    fetch('/api/set_artist_genre', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist: artist, genre: genre })
+    })
+    .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+    })
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            alert(`Genre for "${artist}" saved.`);
+            // Refresh the search results to show the updated genre
+            searchArtists();
+        }
+    })
+    .catch(err => {
+        console.error("Save failed:", err);
+        alert("Request failed: " + err.message);
+    });
+}
     // Album genre tagging functions
     function clearAlbumSearch() {
         document.getElementById('albumSearchInput').value = '';
@@ -2561,7 +2585,101 @@ function searchAlbums() {
             resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
         });
 }
-    function saveAlbumGenre(artist, album, genre) {
+        // Artist genre tagging functions
+function clearArtistSearch() {
+    document.getElementById('artistSearchInput').value = '';
+    document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
+}
+
+function searchArtists() {
+    const query = document.getElementById('artistSearchInput').value.trim();
+    const resultsDiv = document.getElementById('artistSearchResults');
+    if (!query) {
+        resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>';
+        return;
+    }
+    resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+    fetch(`/api/search_artists?q=${encodeURIComponent(query)}`)
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })
+        .then(artistsData => {
+            console.log("Artists data with suggestions:", artistsData);
+            if (!artistsData.length) {
+                resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
+                return;
+            }
+            // Fetch explicit artist genres from the mapping table
+            fetch('/api/artist_genre_map')
+                .then(r => r.json())
+                .then(mappings => {
+                    let html = '';
+                    artistsData.forEach(item => {
+                        const artist = item.artist;
+                        const suggested = item.suggestedGenre || '';
+                        // Check if there's an explicit mapping
+                        const existingMapping = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
+                        const genre = existingMapping ? existingMapping.genre : suggested;
+                        html += `
+                            <div class="playlist-item" data-artist="${escapeHtml(artist)}">
+                                <span class="playlist-name">${escapeHtml(artist)}</span>
+                                <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                                <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+                    // Attach save handlers
+                    document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
+                        btn.removeEventListener('click', btn._listener);
+                        const listener = (e) => {
+                            const artist = btn.getAttribute('data-artist');
+                            const input = btn.parentElement.querySelector('.genre-input');
+                            saveArtistGenre(artist, input.value.trim());
+                        };
+                        btn.addEventListener('click', listener);
+                        btn._listener = listener;
+                    });
+                })
+                .catch(err => {
+                    console.error("Error fetching artist genre map:", err);
+                    resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`;
+                });
+        })
+        .catch(err => {
+            console.error("Artist search error:", err);
+            resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
+        });
+}
+
+        function saveArtistGenre(artist, genre) {
+            console.log(`Saving genre for artist: ${artist}, genre: ${genre}`);
+            fetch('/api/set_artist_genre', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist: artist, genre: genre })
+            })
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    alert(`Genre for "${artist}" saved.`);
+                    // Refresh the search results
+                    searchArtists();
+                }
+            })
+            .catch(err => {
+                console.error("Save failed:", err);
+                alert("Request failed: " + err.message);
+            });
+        }
+        
+        function saveAlbumGenre(artist, album, genre) {
         fetch('/api/set_album_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, album, genre }) })
             .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for album "${album}" saved.`); searchAlbums(); }).catch(e=>alert('Request failed: '+e));
     }
@@ -2671,6 +2789,7 @@ function searchAlbums() {
     document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
     document.getElementById('clearArtistSearchBtn').addEventListener('click', clearArtistSearch);
     document.getElementById('artistSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchArtists(); });
+    document.getElementById('artistSearchInput').addEventListener('keypress', e => { if(e.key === 'Enter') searchArtists(); })
     document.getElementById('searchAlbumBtn').addEventListener('click', searchAlbums);
     document.getElementById('clearAlbumSearchBtn').addEventListener('click', clearAlbumSearch);
     document.getElementById('albumSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchAlbums(); });
