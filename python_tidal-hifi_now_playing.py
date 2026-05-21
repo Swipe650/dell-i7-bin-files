@@ -679,6 +679,43 @@ def api_monthly_report():
     start_ts = int(start_date.timestamp())
     end_ts = int(end_date.timestamp())
 
+@app.route('/api/genre_list')
+def api_genre_list():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT genre FROM scrobbles WHERE genre IS NOT NULL AND genre != '' ORDER BY genre")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([row[0] for row in rows])
+
+@app.route('/api/genre_items')
+def api_genre_items():
+    genre = request.args.get('genre', '')
+    if not genre:
+        return jsonify({"error": "Missing genre"}), 400
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    # Artists
+    c.execute("SELECT DISTINCT artist FROM scrobbles WHERE genre = ? ORDER BY artist", (genre,))
+    artists = [row[0] for row in c.fetchall()]
+    # Albums
+    c.execute("SELECT DISTINCT artist, album FROM scrobbles WHERE genre = ? AND album IS NOT NULL AND album != '' ORDER BY artist, album", (genre,))
+    albums = [{"artist": row[0], "album": row[1]} for row in c.fetchall()]
+    # Tracks
+    c.execute("SELECT DISTINCT artist, track FROM scrobbles WHERE genre = ? ORDER BY artist, track", (genre,))
+    tracks = [{"artist": row[0], "track": row[1]} for row in c.fetchall()]
+    # Total scrobbles
+    c.execute("SELECT COUNT(*) FROM scrobbles WHERE genre = ?", (genre,))
+    total = c.fetchone()[0]
+    conn.close()
+    return jsonify({
+        "genre": genre,
+        "total_scrobbles": total,
+        "artists": artists,
+        "albums": albums,
+        "tracks": tracks
+    })
+
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
 
@@ -2082,6 +2119,37 @@ MONTHLY_TEMPLATE = """
         </div>
     </div>
     </div>
+        <!-- Genre Browser -->
+    <div class="table-card" style="margin-top: 2rem;">
+        <h3>🔍 Browse by Genre</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Select a genre to see all artists, albums, and tracks tagged with it.</p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+            <select id="genreSelect" style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+                <option value="">-- Select a genre --</option>
+            </select>
+            <button id="loadGenreBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Browse</button>
+        </div>
+        <div id="genreResults" style="display: none;">
+            <div class="stats-trend-row" style="margin-bottom: 1rem;">
+                <div class="stat-badge"><div class="label">Total Scrobbles</div><div class="value" id="genreTotal">0</div></div>
+            </div>
+            <div class="tables-grid">
+                <div class="table-card">
+                    <h4>🎤 Artists</h4>
+                    <ul class="stat-list" id="genreArtistsList" style="max-height: 200px;"></ul>
+                </div>
+                <div class="table-card">
+                    <h4>💿 Albums</h4>
+                    <ul class="stat-list" id="genreAlbumsList" style="max-height: 200px;"></ul>
+                </div>
+                <div class="table-card">
+                    <h4>🎵 Tracks</h4>
+                    <ul class="stat-list" id="genreTracksList" style="max-height: 200px;"></ul>
+                </div>
+            </div>
+        </div>
+        <div id="genreNoData" style="display: none; text-align: center; padding: 1rem;">Select a genre and click Browse.</div>
+    </div>
 
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
@@ -2430,6 +2498,83 @@ function saveArtistGenre(artist, genre) {
     })
     .catch(e => alert('Request failed: ' + e));
 }
+
+// Genre Browser functions
+function loadGenreList() {
+    const select = document.getElementById('genreSelect');
+    select.innerHTML = '<option value="">-- Loading genres --</option>';
+    fetch('/api/genre_list')
+        .then(r => r.json())
+        .then(genres => {
+            select.innerHTML = '<option value="">-- Select a genre --</option>';
+            genres.forEach(genre => {
+                const option = document.createElement('option');
+                option.value = genre;
+                option.textContent = genre;
+                select.appendChild(option);
+            });
+        })
+        .catch(e => {
+            console.error("Failed to load genre list:", e);
+            select.innerHTML = '<option value="">Error loading genres</option>';
+        });
+}
+
+function browseGenre() {
+    const genre = document.getElementById('genreSelect').value;
+    const resultsDiv = document.getElementById('genreResults');
+    const noDataDiv = document.getElementById('genreNoData');
+    if (!genre) {
+        resultsDiv.style.display = 'none';
+        noDataDiv.style.display = 'block';
+        noDataDiv.innerHTML = 'Select a genre and click Browse.';
+        return;
+    }
+    resultsDiv.style.display = 'none';
+    noDataDiv.style.display = 'block';
+    noDataDiv.innerHTML = 'Loading...';
+    fetch(`/api/genre_items?genre=${encodeURIComponent(genre)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                noDataDiv.innerHTML = `Error: ${data.error}`;
+                return;
+            }
+            document.getElementById('genreTotal').innerText = data.total_scrobbles;
+            const artistsList = document.getElementById('genreArtistsList');
+            if (data.artists.length === 0) {
+                artistsList.innerHTML = '<li>No artists in this genre</li>';
+            } else {
+                artistsList.innerHTML = data.artists.map(a => `<li><span>${escapeHtml(a)}</span></li>`).join('');
+            }
+            const albumsList = document.getElementById('genreAlbumsList');
+            if (data.albums.length === 0) {
+                albumsList.innerHTML = '<li>No albums in this genre</li>';
+            } else {
+                albumsList.innerHTML = data.albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span></li>`).join('');
+            }
+            const tracksList = document.getElementById('genreTracksList');
+            if (data.tracks.length === 0) {
+                tracksList.innerHTML = '<li>No tracks in this genre</li>';
+            } else {
+                tracksList.innerHTML = data.tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span></li>`).join('');
+            }
+            resultsDiv.style.display = 'block';
+            noDataDiv.style.display = 'none';
+        })
+        .catch(e => {
+            console.error("Browse error:", e);
+            noDataDiv.innerHTML = `Error: ${e.message}`;
+        });
+}
+
+// Attach event listeners
+document.getElementById('loadGenreBtn').addEventListener('click', browseGenre);
+// Optional: also load when dropdown changes
+document.getElementById('genreSelect').addEventListener('change', browseGenre);
+
+// Initial load of genre list
+loadGenreList();
 
 // Attach event listener for the search button and Enter key
 document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
