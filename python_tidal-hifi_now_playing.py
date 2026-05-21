@@ -2235,8 +2235,11 @@ MONTHLY_TEMPLATE = """
         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
             <input type="text" id="artistSearchInput" placeholder="Type artist name..." style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
             <button id="searchArtistBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
+            <button id="clearArtistSearchBtn" style="background: #6c757d; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Clear</button>
         </div>
-        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Search for an artist to assign a genre.</div></div>
+        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-message">Search for an artist to assign a genre.</div>
+        </div>
     </div>
 
     <!-- Browse by Genre -->
@@ -2398,7 +2401,14 @@ MONTHLY_TEMPLATE = """
         fetch('/api/set_artist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, genre }) })
             .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(e=>alert('Request failed: '+e));
     }
+    function clearArtistSearch() {
+        document.getElementById('artistSearchInput').value = '';
+        document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
+    }
 
+    // Add event listener for the clear button (already inside the script)
+    document.getElementById('clearArtistSearchBtn').addEventListener('click', clearArtistSearch);
+    
     function loadGenreList() {
         fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
             const select = document.getElementById('genreSelect');
