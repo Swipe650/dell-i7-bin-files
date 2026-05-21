@@ -679,6 +679,70 @@ def api_monthly_report():
     start_ts = int(start_date.timestamp())
     end_ts = int(end_date.timestamp())
 
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+
+    c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ? AND timestamp < ?", (start_ts, end_ts))
+    total_scrobbles = c.fetchone()[0]
+
+    c.execute("SELECT SUM(duration_sec) FROM scrobbles WHERE timestamp >= ? AND timestamp < ? AND duration_sec > 0", (start_ts, end_ts))
+    total_sec = c.fetchone()[0] or 0
+    total_hours = round(total_sec / 3600, 1)
+
+    c.execute("""
+        SELECT artist, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY artist
+        ORDER BY count DESC
+        LIMIT 25
+    """, (start_ts, end_ts))
+    top_artists = [{"artist": row[0], "count": row[1]} for row in c.fetchall()]
+
+    c.execute("""
+        SELECT artist, album, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ? AND album IS NOT NULL AND album != ''
+        GROUP BY artist, album
+        ORDER BY count DESC
+        LIMIT 25
+    """, (start_ts, end_ts))
+    top_albums = [{"artist": row[0], "album": row[1], "count": row[2]} for row in c.fetchall()]
+
+    c.execute("""
+        SELECT artist, track, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY artist, track
+        ORDER BY count DESC
+        LIMIT 25
+    """, (start_ts, end_ts))
+    top_tracks = [{"artist": row[0], "track": row[1], "count": row[2]} for row in c.fetchall()]
+
+    c.execute("""
+        SELECT strftime('%H', datetime(timestamp, 'unixepoch')) as hour, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY hour
+        ORDER BY hour
+    """, (start_ts, end_ts))
+    rows = c.fetchall()
+    hour_counts = [0] * 24
+    for row in rows:
+        hour_counts[int(row[0])] = row[1]
+    conn.close()
+
+    return jsonify({
+        "year": year,
+        "month": month,
+        "total_scrobbles": total_scrobbles,
+        "total_hours": total_hours,
+        "top_artists": top_artists,
+        "top_albums": top_albums,
+        "top_tracks": top_tracks,
+        "hour_counts": hour_counts
+    })
+
 @app.route('/api/genre_list')
 def api_genre_list():
     conn = sqlite3.connect(DATABASE)
