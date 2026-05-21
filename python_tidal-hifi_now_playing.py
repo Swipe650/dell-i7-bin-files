@@ -520,6 +520,8 @@ def background_poller():
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
 
+
+
 # ------------------------- FLASK ROUTES -------------------------
 @app.route('/')
 def index():
@@ -902,6 +904,56 @@ def api_current_genre():
             genre = row[0]
     conn.close()
     return jsonify({"genre": genre})
+
+@app.route('/api/search_scrobbles')
+def api_search_scrobbles():
+    track = request.args.get('track', '')
+    artist = request.args.get('artist', '')
+    album = request.args.get('album', '')
+    playlist = request.args.get('playlist', '')
+    genre = request.args.get('genre', '')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    limit = request.args.get('limit', 100, type=int)
+
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    query = "SELECT * FROM scrobbles WHERE 1=1"
+    params = []
+
+    if track:
+        query += " AND track LIKE ?"
+        params.append(f"%{track}%")
+    if artist:
+        query += " AND artist LIKE ?"
+        params.append(f"%{artist}%")
+    if album:
+        query += " AND album LIKE ?"
+        params.append(f"%{album}%")
+    if playlist:
+        query += " AND playlist = ?"
+        params.append(playlist)
+    if genre:
+        query += " AND genre = ?"
+        params.append(genre)
+    if start_date:
+        start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
+        query += " AND timestamp >= ?"
+        params.append(start_ts)
+    if end_date:
+        end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp()) + 86400
+        query += " AND timestamp < ?"
+        params.append(end_ts)
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
 
 @app.route('/export')
 def export_data():
@@ -1599,7 +1651,7 @@ SCROBBLES_TEMPLATE = """
         <div style="display: flex; gap: 10px;">
             <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()">🌓 Dark/Light</button>
             <a href="/" class="player-link" target="_blank">◀ Now Playing (full)</a>
-            <a href="/monthly" class="report-link" target="_blank">📅 Monthly Reports</a>
+            <a href="/monthly" class="report-link" target="_blank">📊 Reports & Tools</a>
         </div>
     </div>
 
@@ -1937,7 +1989,7 @@ MONTHLY_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Monthly Listening Report · TIDAL</title>
+    <title>Reports and Tools · TIDAL</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3CradialGradient id='grad' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23e0e0e0'/%3E%3Cstop offset='70%25' stop-color='%23a0a0a0'/%3E%3Cstop offset='100%25' stop-color='%23404040'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23grad)' stroke='%23333' stroke-width='2'/%3E%3Ccircle cx='50' cy='50' r='12' fill='%23333'/%3E%3C/svg%3E">
@@ -2000,7 +2052,7 @@ MONTHLY_TEMPLATE = """
         .back-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .controls { margin-bottom: 1.5rem; }
         .month-picker-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
-        input { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary); }
+        input, select { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary); }
         button { background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white; font-weight: bold; }
         .stats-trend-row {
             display: flex;
@@ -2034,8 +2086,7 @@ MONTHLY_TEMPLATE = """
         }
         .trend-card h4 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: var(--accent); }
         .trend-card canvas { width: 100%; max-height: 150px; margin-top: 0; }
-        .tables-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
-        .table-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; border: 1px solid var(--border-card); }
+        .table-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; border: 1px solid var(--border-card); margin-top: 2rem; }
         .table-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
         .stat-list { list-style: none; padding: 0 5px 0 0; margin: 0; max-height: 300px; overflow-y: auto; }
         .stat-list li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
@@ -2059,7 +2110,7 @@ MONTHLY_TEMPLATE = """
             text-overflow: ellipsis;
             padding-right: 1rem;
         }
-        .edit-playlist-btn {
+        .edit-playlist-btn, .save-genre-btn, .save-artist-genre-btn {
             background: var(--button-bg);
             border: 1px solid var(--button-border);
             border-radius: 6px;
@@ -2069,8 +2120,12 @@ MONTHLY_TEMPLATE = """
             transition: all 0.2s;
             color: var(--text-primary);
         }
-        .edit-playlist-btn:hover {
+        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover {
             background: var(--button-hover);
+        }
+        .save-genre-btn, .save-artist-genre-btn {
+            background: var(--accent);
+            color: white;
         }
         .genre-input {
             background: var(--button-bg);
@@ -2080,15 +2135,6 @@ MONTHLY_TEMPLATE = """
             margin: 0 10px;
             width: 120px;
             color: var(--text-primary);
-        }
-        .save-genre-btn {
-            background: var(--accent);
-            border: none;
-            border-radius: 6px;
-            padding: 4px 10px;
-            cursor: pointer;
-            color: white;
-            font-size: 0.75rem;
         }
         .backfill-btn {
             background: #6c757d;
@@ -2105,14 +2151,35 @@ MONTHLY_TEMPLATE = """
         @media (max-width: 700px) {
             .stats-trend-row { flex-direction: column; }
         }
+        .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
+        .scrobble-item:hover { background: var(--hover-row, #fef9f9); }
+        .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: #f0f0f0; }
+        body.dark .album-art { background: #2c2c2c; }
+        .track-info { flex: 1; min-width: 0; }
+        .track-name { font-weight: 600; font-size: 1rem; }
+        .artist-name { font-size: 0.85rem; color: var(--text-secondary); margin-top: 2px; }
+        .album-name { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .scrobble-date { flex-shrink: 0; font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 120px; }
+        .delete-scrobble {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            color: var(--text-secondary);
+            padding: 0 4px;
+        }
+        .delete-scrobble:hover { opacity: 1; color: var(--accent); }
+        .empty-message { padding: 2rem; text-align: center; color: var(--text-muted); }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
         <div>
-            <h1>📅 Monthly Listening Report</h1>
-            <div class="sub">detailed breakdown for any month</div>
+            <h1>📊 Reports and Tools</h1>
+            <div class="sub">playlist rename, genre tagging & monthly reports</div>
         </div>
         <a href="/scrobbles" class="back-link">◀ Back to Overview</a>
     </div>
@@ -2125,7 +2192,6 @@ MONTHLY_TEMPLATE = """
     </div>
 
     <div id="reportContent" style="display: none;">
-        <!-- Row: Total Scrobbles, Listening Time, and Trend Chart -->
         <div class="stats-trend-row">
             <div class="stat-badge"><div class="label">Total Scrobbles</div><div class="value" id="totalScrobbles">-</div></div>
             <div class="stat-badge"><div class="label">Listening Time</div><div class="value" id="totalHours">-</div><div class="label">hours</div></div>
@@ -2135,13 +2201,7 @@ MONTHLY_TEMPLATE = """
             </div>
         </div>
 
-        <div class="tables-grid">
-            <div class="table-card"><h3>🎤 Top Artists</h3><ul class="stat-list" id="topArtists"></ul></div>
-            <div class="table-card"><h3>💿 Top Albums</h3><ul class="stat-list" id="topAlbums"></ul></div>
-            <div class="table-card"><h3>🎵 Top Tracks</h3><ul class="stat-list" id="topTracks"></ul></div>
-        </div>
-
-        <div class="table-card">
+        <div class="table-card" style="margin-top: 0;">
             <h3>🕒 Listening Clock (Hourly Distribution)</h3>
             <canvas id="clockChart" width="100%" height="250"></canvas>
         </div>
@@ -2150,47 +2210,41 @@ MONTHLY_TEMPLATE = """
     <div id="loadingMsg" style="text-align: center; padding: 2rem;">Select a month and click Generate Report.</div>
 
     <!-- Playlist Renaming Tool -->
-    <div class="table-card" style="margin-top: 2rem;">
+    <div class="table-card">
         <h3>📀 Rename Playlists</h3>
         <p class="sub" style="margin-bottom: 1rem;">Edit any playlist name – all past scrobbles will be updated.</p>
-        <div id="playlistList" style="max-height: 300px; overflow-y: auto;">
-            <div class="empty-message">Loading playlists...</div>
+        <div id="playlistList" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Loading playlists...</div></div>
+    </div>
+
+    <!-- Genre Tagging Tool (by Playlist) -->
+    <div class="table-card">
+        <h3>🏷️ Genre Tagging (by Playlist)</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Assign a genre to each playlist – all scrobbles from that playlist will be tagged.</p>
+        <div id="genreMappingList" style="max-height: 400px; overflow-y: auto;"><div class="empty-message">Loading playlists...</div></div>
+        <button id="backfillGenresBtn" class="backfill-btn">Backfill Genres for Past Scrobbles</button>
+        <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
+            <button id="backfillArtistGenresBtn" class="backfill-btn">Backfill Artist Genres</button>
+            <button id="backfillAlbumGenresBtn" class="backfill-btn">Backfill Album Genres</button>
         </div>
     </div>
 
-    <!-- Genre Tagging Tool -->
-    <div class="table-card" style="margin-top: 2rem;">
-        <h3>🏷️ Genre Tagging (by Playlist)</h3>
-        <p class="sub" style="margin-bottom: 1rem;">Assign a genre to each playlist – all scrobbles from that playlist will be tagged.</p>
-        <div id="genreMappingList" style="max-height: 400px; overflow-y: auto;">
-            <div class="empty-message">Loading playlists...</div>
-        </div>
-        <button id="backfillGenresBtn" class="backfill-btn">Backfill Genres for Past Scrobbles</button>
-        <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
-    <button id="backfillArtistGenresBtn" class="backfill-btn">Backfill Artist Genres</button>
-    <button id="backfillAlbumGenresBtn" class="backfill-btn">Backfill Album Genres</button>
-    </div>
-        <!-- Artist Genre Tagging Tool -->
-    <div class="table-card" style="margin-top: 2rem;">
+    <!-- Artist Genre Tagging Tool -->
+    <div class="table-card">
         <h3>🏷️ Tag Artist by Genre</h3>
         <p class="sub" style="margin-bottom: 1rem;">Search for an artist, then assign a genre (artist genre overrides playlist/album genres).</p>
         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
             <input type="text" id="artistSearchInput" placeholder="Type artist name..." style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
             <button id="searchArtistBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
         </div>
-        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;">
-            <div class="empty-message">Search for an artist to assign a genre.</div>
-        </div>
+        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Search for an artist to assign a genre.</div></div>
     </div>
-    </div>
-        <!-- Genre Browser -->
-    <div class="table-card" style="margin-top: 2rem;">
+
+    <!-- Browse by Genre -->
+    <div class="table-card">
         <h3>🔍 Browse by Genre</h3>
         <p class="sub" style="margin-bottom: 1rem;">Select a genre to see all artists, albums, and tracks tagged with it.</p>
         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
-            <select id="genreSelect" style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
-                <option value="">-- Select a genre --</option>
-            </select>
+            <select id="genreSelect" style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);"><option value="">-- Select a genre --</option></select>
             <button id="loadGenreBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Browse</button>
         </div>
         <div id="genreResults" style="display: none;">
@@ -2198,21 +2252,28 @@ MONTHLY_TEMPLATE = """
                 <div class="stat-badge"><div class="label">Total Scrobbles</div><div class="value" id="genreTotal">0</div></div>
             </div>
             <div class="tables-grid">
-                <div class="table-card">
-                    <h4>🎤 Artists</h4>
-                    <ul class="stat-list" id="genreArtistsList" style="max-height: 200px;"></ul>
-                </div>
-                <div class="table-card">
-                    <h4>💿 Albums</h4>
-                    <ul class="stat-list" id="genreAlbumsList" style="max-height: 200px;"></ul>
-                </div>
-                <div class="table-card">
-                    <h4>🎵 Tracks</h4>
-                    <ul class="stat-list" id="genreTracksList" style="max-height: 200px;"></ul>
-                </div>
+                <div class="table-card"><h4>🎤 Artists</h4><ul class="stat-list" id="genreArtistsList" style="max-height: 200px;"></ul></div>
+                <div class="table-card"><h4>💿 Albums</h4><ul class="stat-list" id="genreAlbumsList" style="max-height: 200px;"></ul></div>
+                <div class="table-card"><h4>🎵 Tracks</h4><ul class="stat-list" id="genreTracksList" style="max-height: 200px;"></ul></div>
             </div>
         </div>
         <div id="genreNoData" style="display: none; text-align: center; padding: 1rem;">Select a genre and click Browse.</div>
+    </div>
+
+    <!-- Search Scrobbles Card (moved below Browse by Genre) -->
+    <div class="table-card">
+        <h3>🔍 Search Scrobbles</h3>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
+            <div style="flex: 1; min-width: 150px;"><label>Track</label><input type="text" id="searchTrack" placeholder="Track name" style="width:100%;"></div>
+            <div style="flex: 1; min-width: 150px;"><label>Artist</label><input type="text" id="searchArtist" placeholder="Artist name" style="width:100%;"></div>
+            <div style="flex: 1; min-width: 150px;"><label>Album</label><input type="text" id="searchAlbum" placeholder="Album name" style="width:100%;"></div>
+            <div style="flex: 1; min-width: 120px;"><label>Genre</label><select id="searchGenre" style="width:100%;"><option value="">All</option></select></div>
+            <div style="flex: 1; min-width: 120px;"><label>Playlist</label><input type="text" id="searchPlaylist" placeholder="Playlist name" style="width:100%;"></div>
+            <div style="flex: 1; min-width: 130px;"><label>Start Date</label><input type="date" id="searchStartDate" style="width:100%;"></div>
+            <div style="flex: 1; min-width: 130px;"><label>End Date</label><input type="date" id="searchEndDate" style="width:100%;"></div>
+            <div><button id="searchScrobblesBtn" class="backfill-btn" style="background: var(--accent);">Search</button><button id="clearSearchBtn" class="backfill-btn" style="background: #6c757d; margin-left:5px;">Clear</button></div>
+        </div>
+        <div id="searchResults" style="margin-top: 1rem;"><div class="empty-message">Enter search criteria and click Search.</div></div>
     </div>
 
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
@@ -2224,443 +2285,238 @@ MONTHLY_TEMPLATE = """
 
     async function loadReport() {
         const monthInput = document.getElementById('monthPicker').value;
-        if (!monthInput) {
-            console.error("No month selected");
-            return;
-        }
+        if (!monthInput) return;
         const [year, month] = monthInput.split('-');
         const contentDiv = document.getElementById('reportContent');
         const loadingMsg = document.getElementById('loadingMsg');
-        
         loadingMsg.style.display = 'block';
         loadingMsg.innerText = 'Loading report...';
         contentDiv.style.display = 'none';
-        
-        console.log(`Fetching monthly report for year=${year}, month=${month}`);
-        
         try {
             const response = await fetch(`/api/monthly_report?year=${year}&month=${month}`);
-            console.log("Response status:", response.status);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error ${response.status}`);
-            }
-            
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            console.log("Received data:", data);
-            
-            if (data.error) {
-                loadingMsg.innerText = `Error: ${data.error}`;
-                console.error("API error:", data.error);
-                return;
-            }
-            
+            if (data.error) throw new Error(data.error);
             document.getElementById('totalScrobbles').innerText = data.total_scrobbles;
             document.getElementById('totalHours').innerText = data.total_hours;
-            
-            const artistsList = document.getElementById('topArtists');
-            if (data.top_artists.length === 0) {
-                artistsList.innerHTML = '<li>No scrobbles in this month</li>';
-            } else {
-                artistsList.innerHTML = data.top_artists.map(a => `<li><span>${escapeHtml(a.artist)}</span><span class="stat-count">${a.count}</span></li>`).join('');
-            }
-            
-            const albumsList = document.getElementById('topAlbums');
-            if (data.top_albums.length === 0) {
-                albumsList.innerHTML = '<li>No albums in this month</li>';
-            } else {
-                albumsList.innerHTML = data.top_albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span><span class="stat-count">${a.count}</span></li>`).join('');
-            }
-            
-            const tracksList = document.getElementById('topTracks');
-            if (data.top_tracks.length === 0) {
-                tracksList.innerHTML = '<li>No tracks in this month</li>';
-            } else {
-                tracksList.innerHTML = data.top_tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span><span class="stat-count">${t.count}</span></li>`).join('');
-            }
-            
             const ctx = document.getElementById('clockChart').getContext('2d');
             if (clockChart) clockChart.destroy();
-            clockChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: Array.from({length: 24}, (_, i) => `${i}:00`),
-                    datasets: [{
-                        label: 'Scrobbles',
-                        data: data.hour_counts,
-                        backgroundColor: '#36a2eb',
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Scrobbles' } },
-                              x: { title: { display: true, text: 'Hour of Day' } } }
-                }
-            });
-            
+            clockChart = new Chart(ctx, { type: 'bar', data: { labels: Array.from({length:24},(_,i)=>`${i}:00`), datasets: [{ label: 'Scrobbles', data: data.hour_counts, backgroundColor: '#36a2eb', borderRadius: 4 }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
             loadingMsg.style.display = 'none';
             contentDiv.style.display = 'block';
-            
-        } catch (err) {
-            console.error("Fetch error:", err);
-            loadingMsg.innerText = `Error loading report: ${err.message}. See console.`;
-            loadingMsg.style.color = 'var(--accent)';
+        } catch(err) {
+            console.error(err);
+            loadingMsg.innerText = `Error: ${err.message}`;
         }
     }
 
     function loadTrendChart() {
-        fetch('/api/monthly_trend')
-            .then(r => r.json())
-            .then(data => {
-                const ctx = document.getElementById('trendChart').getContext('2d');
-                if (trendChart) trendChart.destroy();
-                trendChart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: data.map(d => d.month),
-                        datasets: [{
-                            label: 'Scrobbles',
-                            data: data.map(d => d.scrobbles),
-                            backgroundColor: '#36a2eb',
-                            borderRadius: 4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        plugins: { legend: { display: false } },
-                        scales: { y: { beginAtZero: true } }
-                    }
-                });
-            })
-            .catch(e => console.error('Trend chart error:', e));
-    }
-    
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
+        fetch('/api/monthly_trend').then(r=>r.json()).then(data=>{
+            const ctx = document.getElementById('trendChart').getContext('2d');
+            if(trendChart) trendChart.destroy();
+            trendChart = new Chart(ctx, { type: 'bar', data: { labels: data.map(d=>d.month), datasets: [{ label: 'Scrobbles', data: data.map(d=>d.scrobbles), backgroundColor: '#36a2eb', borderRadius: 4 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } });
+        }).catch(e=>console.error(e));
     }
 
-    // Playlist rename functions
-    let currentPlaylists = [];
+    function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
+    function formatRelativeTime(timestamp) {
+        const seconds = Math.floor((Date.now()/1000)-timestamp);
+        if(seconds<60) return 'just now';
+        const minutes = Math.floor(seconds/60);
+        if(minutes<60) return `${minutes} minute${minutes===1?'':'s'} ago`;
+        const hours = Math.floor(minutes/60);
+        if(hours<24) return `${hours} hour${hours===1?'':'s'} ago`;
+        const days = Math.floor(hours/24);
+        if(days<7) return `${days} day${days===1?'':'s'} ago`;
+        return new Date(timestamp*1000).toLocaleDateString();
+    }
 
     function loadPlaylists() {
         const container = document.getElementById('playlistList');
         container.innerHTML = '<div class="empty-message">Loading playlists...</div>';
-        fetch('/api/playlists')
-            .then(r => r.json())
-            .then(data => {
-                currentPlaylists = data;
-                if (data.length === 0) {
-                    container.innerHTML = '<div class="empty-message">No playlists found in scrobbles.</div>';
-                } else {
-                    let html = '';
-                    data.forEach(playlist => {
-                        html += `
-                            <div class="playlist-item" data-oldname="${escapeHtml(playlist)}">
-                                <span class="playlist-name">${escapeHtml(playlist)}</span>
-                                <button class="edit-playlist-btn" onclick="renamePlaylist('${escapeHtml(playlist).replace(/'/g, "\\'")}')">✏️ Rename</button>
-                            </div>
-                        `;
-                    });
-                    container.innerHTML = html;
-                }
-            })
-            .catch(e => {
-                console.error(e);
-                container.innerHTML = '<div class="empty-message">Error loading playlists.</div>';
-            });
+        fetch('/api/playlists').then(r=>r.json()).then(data=>{
+            if(data.length===0) { container.innerHTML = '<div class="empty-message">No playlists found.</div>'; return; }
+            container.innerHTML = data.map(p => `<div class="playlist-item"><span class="playlist-name">${escapeHtml(p)}</span><button class="edit-playlist-btn" onclick="renamePlaylist('${escapeHtml(p).replace(/'/g, "\\'")}')">✏️ Rename</button></div>`).join('');
+        }).catch(e=>{ container.innerHTML = '<div class="empty-message">Error loading playlists.</div>'; console.error(e); });
     }
-
     function renamePlaylist(oldName) {
         const newName = prompt('Enter new name for playlist:', oldName);
-        if (!newName || newName === oldName) return;
-        fetch('/api/rename_playlist', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ old_name: oldName, new_name: newName })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) {
-                alert('Error: ' + data.error);
-            } else {
-                alert(`Renamed "${oldName}" to "${newName}" (${data.updated} scrobble(s) updated).`);
-                loadPlaylists();
-                loadGenreMappings();
-                loadTrendChart();
-            }
-        })
-        .catch(e => alert('Request failed: ' + e));
+        if(!newName || newName===oldName) return;
+        fetch('/api/rename_playlist', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ old_name: oldName, new_name: newName }) })
+            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Renamed to "${newName}" (${data.updated} updates).`); loadPlaylists(); loadGenreMappings(); loadTrendChart(); }).catch(e=>alert('Request failed: '+e));
     }
 
-    // Genre tagging functions
     function loadGenreMappings() {
         const container = document.getElementById('genreMappingList');
         container.innerHTML = '<div class="empty-message">Loading...</div>';
-        fetch('/api/playlist_genre_map')
-            .then(r => r.json())
-            .then(data => {
-                fetch('/api/playlists')
-                    .then(r2 => r2.json())
-                    .then(allPlaylists => {
-                        if (allPlaylists.length === 0) {
-                            container.innerHTML = '<div class="empty-message">No playlists found in scrobbles.</div>';
-                            return;
-                        }
-                        let html = '';
-                        allPlaylists.forEach(playlist => {
-                            const existing = data.find(m => m.playlist === playlist);
-                            const genre = existing ? existing.genre : '';
-                            html += `
-                                <div class="playlist-item" data-playlist="${escapeHtml(playlist)}">
-                                    <span class="playlist-name">${escapeHtml(playlist)}</span>
-                                    <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
-                                    <button class="save-genre-btn" data-playlist="${escapeHtml(playlist)}">Save</button>
-                                </div>
-                            `;
-                        });
-                        container.innerHTML = html;
-                        document.querySelectorAll('.save-genre-btn').forEach(btn => {
-                            btn.addEventListener('click', (e) => {
-                                const playlist = btn.getAttribute('data-playlist');
-                                const input = btn.parentElement.querySelector('.genre-input');
-                                const genreVal = input.value.trim();
-                                saveGenreMapping(playlist, genreVal);
-                            });
-                        });
-                    });
-            })
-            .catch(e => {
-                console.error(e);
-                container.innerHTML = '<div class="empty-message">Error loading genre mappings.</div>';
+        fetch('/api/playlist_genre_map').then(r=>r.json()).then(maps=>{
+            fetch('/api/playlists').then(r=>r.json()).then(playlists=>{
+                if(playlists.length===0) { container.innerHTML = '<div class="empty-message">No playlists found.</div>'; return; }
+                container.innerHTML = playlists.map(p => {
+                    const existing = maps.find(m=>m.playlist===p);
+                    const genre = existing ? existing.genre : '';
+                    return `<div class="playlist-item"><span class="playlist-name">${escapeHtml(p)}</span><input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre"><button class="save-genre-btn" data-playlist="${escapeHtml(p)}">Save</button></div>`;
+                }).join('');
+                document.querySelectorAll('.save-genre-btn').forEach(btn => btn.addEventListener('click', (e)=>{
+                    const playlist = btn.getAttribute('data-playlist');
+                    const input = btn.parentElement.querySelector('.genre-input');
+                    saveGenreMapping(playlist, input.value.trim());
+                }));
             });
+        }).catch(e=>{ container.innerHTML = '<div class="empty-message">Error loading genre mappings.</div>'; console.error(e); });
     }
-
     function saveGenreMapping(playlist, genre) {
-        fetch('/api/set_playlist_genre', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ playlist: playlist, genre: genre })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) alert('Error: ' + data.error);
-            else alert(`Genre for "${playlist}" saved.`);
-            loadGenreMappings();
-        })
-        .catch(e => alert('Request failed: ' + e));
+        fetch('/api/set_playlist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ playlist, genre }) })
+            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre saved.`); loadGenreMappings(); }).catch(e=>alert('Request failed: '+e));
     }
+    function backfillGenres() { if(!confirm("Update all past scrobbles with playlist genre mappings?")) return; fetch('/api/backfill_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
+    function backfillArtistGenres() { if(!confirm("Update all past scrobbles with artist genre mappings?")) return; fetch('/api/backfill_artist_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Artist backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
+    function backfillAlbumGenres() { if(!confirm("Update all past scrobbles with album genre mappings?")) return; fetch('/api/backfill_album_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Album backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
 
-    function backfillGenres() {
-        if (!confirm("This will update all existing scrobbles that have a playlist with a genre mapping. Continue?")) return;
-        fetch('/api/backfill_genres', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                alert(`Backfill complete. ${data.updated} scrobbles updated.`);
-            })
-            .catch(e => alert('Error: ' + e));
-    }
-    
-    function backfillArtistGenres() {
-    if (!confirm("This will update all existing scrobbles that have an artist with a genre mapping. Continue?")) return;
-    fetch('/api/backfill_artist_genres', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            alert(`Artist backfill complete. ${data.updated} scrobbles updated.`);
-        })
-        .catch(e => alert('Error: ' + e));
-}
-
-    function backfillAlbumGenres() {
-        if (!confirm("This will update all existing scrobbles that have an album (with matching artist) with a genre mapping. Continue?")) return;
-        fetch('/api/backfill_album_genres', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                alert(`Album backfill complete. ${data.updated} scrobbles updated.`);
-            })
-            .catch(e => alert('Error: ' + e));
-    }
-    
-    // Artist genre tagging functions
-let currentArtistSearchResults = [];
-
-function searchArtists() {
-    const query = document.getElementById('artistSearchInput').value.trim();
-    const resultsDiv = document.getElementById('artistSearchResults');
-    if (!query) {
-        resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>';
-        return;
-    }
-    resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
-    fetch(`/api/search_artists?q=${encodeURIComponent(query)}`)
-        .then(response => {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            return response.json();
-        })
-        .then(artists => {
-            console.log("Artists found:", artists);
-            if (!artists.length) {
-                resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
-                return;
-            }
-            // Only fetch genre map if artists exist
-            fetch('/api/artist_genre_map')
-                .then(r => r.json())
-                .then(mappings => {
-                    let html = '';
-                    artists.forEach(artist => {
-                        const existing = mappings.find(m => m.artist === artist);
-                        const genre = existing ? existing.genre : '';
-                        html += `
-                            <div class="playlist-item" data-artist="${escapeHtml(artist)}">
-                                <span class="playlist-name">${escapeHtml(artist)}</span>
-                                <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
-                                <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
-                            </div>
-                        `;
-                    });
-                    resultsDiv.innerHTML = html;
-                    // Attach save handlers
-                    document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
-                        btn.removeEventListener('click', btn._listener);
-                        const listener = () => {
-                            const artist = btn.getAttribute('data-artist');
-                            const input = btn.parentElement.querySelector('.genre-input');
-                            const genreVal = input.value.trim();
-                            saveArtistGenre(artist, genreVal);
-                        };
-                        btn.addEventListener('click', listener);
-                        btn._listener = listener;
-                    });
-                })
-                .catch(err => {
-                    console.error("Error fetching genre map:", err);
-                    resultsDiv.innerHTML = `<div class="empty-message">Error loading genre data: ${err.message}</div>`;
-                });
-        })
-        .catch(err => {
-            console.error("Search error:", err);
-            resultsDiv.innerHTML = `<div class="empty-message">Error: ${err.message}</div>`;
-        });
-}
-
-function saveArtistGenre(artist, genre) {
-    fetch('/api/set_artist_genre', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist: artist, genre: genre })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) alert('Error: ' + data.error);
-        else alert(`Genre for "${artist}" saved.`);
-        // Refresh search results to reflect saved genre
-        searchArtists();
-    })
-    .catch(e => alert('Request failed: ' + e));
-}
-
-// Genre Browser functions
-function loadGenreList() {
-    const select = document.getElementById('genreSelect');
-    select.innerHTML = '<option value="">-- Loading genres --</option>';
-    fetch('/api/genre_list')
-        .then(r => r.json())
-        .then(genres => {
-            select.innerHTML = '<option value="">-- Select a genre --</option>';
-            genres.forEach(genre => {
-                const option = document.createElement('option');
-                option.value = genre;
-                option.textContent = genre;
-                select.appendChild(option);
+    function searchArtists() {
+        const query = document.getElementById('artistSearchInput').value.trim();
+        const resultsDiv = document.getElementById('artistSearchResults');
+        if(!query) { resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>'; return; }
+        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+        fetch(`/api/search_artists?q=${encodeURIComponent(query)}`).then(r=>r.json()).then(artists=>{
+            if(!artists.length) { resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>'; return; }
+            fetch('/api/artist_genre_map').then(r=>r.json()).then(mappings=>{
+                resultsDiv.innerHTML = artists.map(artist => {
+                    const existing = mappings.find(m=>m.artist===artist);
+                    const genre = existing ? existing.genre : '';
+                    return `<div class="playlist-item"><span class="playlist-name">${escapeHtml(artist)}</span><input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre"><button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button></div>`;
+                }).join('');
+                document.querySelectorAll('.save-artist-genre-btn').forEach(btn => btn.addEventListener('click', (e)=>{
+                    const artist = btn.getAttribute('data-artist');
+                    const input = btn.parentElement.querySelector('.genre-input');
+                    saveArtistGenre(artist, input.value.trim());
+                }));
             });
-        })
-        .catch(e => {
-            console.error("Failed to load genre list:", e);
-            select.innerHTML = '<option value="">Error loading genres</option>';
-        });
-}
-
-function browseGenre() {
-    const genre = document.getElementById('genreSelect').value;
-    const resultsDiv = document.getElementById('genreResults');
-    const noDataDiv = document.getElementById('genreNoData');
-    if (!genre) {
-        resultsDiv.style.display = 'none';
-        noDataDiv.style.display = 'block';
-        noDataDiv.innerHTML = 'Select a genre and click Browse.';
-        return;
+        }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching artists.</div>'; });
     }
-    resultsDiv.style.display = 'none';
-    noDataDiv.style.display = 'block';
-    noDataDiv.innerHTML = 'Loading...';
-    fetch(`/api/genre_items?genre=${encodeURIComponent(genre)}`)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) {
-                noDataDiv.innerHTML = `Error: ${data.error}`;
-                return;
-            }
+    function saveArtistGenre(artist, genre) {
+        fetch('/api/set_artist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, genre }) })
+            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(e=>alert('Request failed: '+e));
+    }
+
+    function loadGenreList() {
+        fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
+            const select = document.getElementById('genreSelect');
+            select.innerHTML = '<option value="">-- Select a genre --</option>';
+            genres.forEach(g => { const opt = document.createElement('option'); opt.value = g; opt.textContent = g; select.appendChild(opt); });
+        }).catch(e=>console.error(e));
+    }
+    function browseGenre() {
+        const genre = document.getElementById('genreSelect').value;
+        const resultsDiv = document.getElementById('genreResults');
+        const noDataDiv = document.getElementById('genreNoData');
+        if(!genre) { resultsDiv.style.display = 'none'; noDataDiv.style.display = 'block'; noDataDiv.innerHTML = 'Select a genre and click Browse.'; return; }
+        resultsDiv.style.display = 'none'; noDataDiv.style.display = 'block'; noDataDiv.innerHTML = 'Loading...';
+        fetch(`/api/genre_items?genre=${encodeURIComponent(genre)}`).then(r=>r.json()).then(data=>{
+            if(data.error) { noDataDiv.innerHTML = `Error: ${data.error}`; return; }
             document.getElementById('genreTotal').innerText = data.total_scrobbles;
-            const artistsList = document.getElementById('genreArtistsList');
-            if (data.artists.length === 0) {
-                artistsList.innerHTML = '<li>No artists in this genre</li>';
-            } else {
-                artistsList.innerHTML = data.artists.map(a => `<li><span>${escapeHtml(a)}</span></li>`).join('');
-            }
-            const albumsList = document.getElementById('genreAlbumsList');
-            if (data.albums.length === 0) {
-                albumsList.innerHTML = '<li>No albums in this genre</li>';
-            } else {
-                albumsList.innerHTML = data.albums.map(a => `<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span></li>`).join('');
-            }
-            const tracksList = document.getElementById('genreTracksList');
-            if (data.tracks.length === 0) {
-                tracksList.innerHTML = '<li>No tracks in this genre</li>';
-            } else {
-                tracksList.innerHTML = data.tracks.map(t => `<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span></li>`).join('');
-            }
-            resultsDiv.style.display = 'block';
-            noDataDiv.style.display = 'none';
-        })
-        .catch(e => {
-            console.error("Browse error:", e);
-            noDataDiv.innerHTML = `Error: ${e.message}`;
+            document.getElementById('genreArtistsList').innerHTML = data.artists.length ? data.artists.map(a=>`<li><span>${escapeHtml(a)}</span></li>`).join('') : '<li>No artists</li>';
+            document.getElementById('genreAlbumsList').innerHTML = data.albums.length ? data.albums.map(a=>`<li><span>${escapeHtml(a.artist)} – ${escapeHtml(a.album)}</span></li>`).join('') : '<li>No albums</li>';
+            document.getElementById('genreTracksList').innerHTML = data.tracks.length ? data.tracks.map(t=>`<li><span>${escapeHtml(t.artist)} – ${escapeHtml(t.track)}</span></li>`).join('') : '<li>No tracks</li>';
+            resultsDiv.style.display = 'block'; noDataDiv.style.display = 'none';
+        }).catch(e=>{ console.error(e); noDataDiv.innerHTML = `Error: ${e.message}`; });
+    }
+
+    function loadSearchGenres() {
+        fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
+            const select = document.getElementById('searchGenre');
+            select.innerHTML = '<option value="">All</option>';
+            genres.forEach(g => { const opt = document.createElement('option'); opt.value = g; opt.textContent = g; select.appendChild(opt); });
+        }).catch(e=>console.error(e));
+    }
+    function searchScrobbles() {
+        const params = new URLSearchParams();
+        const track = document.getElementById('searchTrack').value.trim(); if(track) params.append('track', track);
+        const artist = document.getElementById('searchArtist').value.trim(); if(artist) params.append('artist', artist);
+        const album = document.getElementById('searchAlbum').value.trim(); if(album) params.append('album', album);
+        const genre = document.getElementById('searchGenre').value; if(genre) params.append('genre', genre);
+        const playlist = document.getElementById('searchPlaylist').value.trim(); if(playlist) params.append('playlist', playlist);
+        const startDate = document.getElementById('searchStartDate').value; if(startDate) params.append('start_date', startDate);
+        const endDate = document.getElementById('searchEndDate').value; if(endDate) params.append('end_date', endDate);
+        params.append('limit', 100);
+        const resultsDiv = document.getElementById('searchResults');
+        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+        fetch(`/api/search_scrobbles?${params.toString()}`).then(r=>r.json()).then(data=>{
+            if(data.length===0) { resultsDiv.innerHTML = '<div class="empty-message">No scrobbles found.</div>'; return; }
+            let html = '<div class="scrobble-list">';
+            data.forEach(s => {
+                const artUrl = s.art_url || 'https://via.placeholder.com/56?text=🎵';
+                const dateStr = formatRelativeTime(s.timestamp);
+                html += `<div class="scrobble-item" data-id="${s.id}">
+                    <img class="album-art" src="${escapeHtml(artUrl)}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
+                    <div class="track-info">
+                        <div class="track-name">${escapeHtml(s.track)}</div>
+                        <div class="artist-name">${escapeHtml(s.artist)}</div>
+                        <div class="album-name">${escapeHtml(s.album || '')}</div>
+                    </div>
+                    <div class="scrobble-date">${dateStr}</div>
+                    <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
+                </div>`;
+            });
+            html += '</div>';
+            resultsDiv.innerHTML = html;
+            attachDeleteHandlersToSearch();
+        }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching scrobbles.</div>'; });
+    }
+    function attachDeleteHandlersToSearch() {
+        document.querySelectorAll('#searchResults .delete-scrobble').forEach(btn => {
+            btn.removeEventListener('click', btn._listener);
+            const listener = async (e) => {
+                e.stopPropagation();
+                const row = btn.closest('.scrobble-item');
+                const scrobbleId = btn.dataset.id;
+                if(!confirm("Delete this scrobble?")) return;
+                try {
+                    const resp = await fetch(`/api/scrobble/${scrobbleId}`, { method: 'DELETE' });
+                    const data = await resp.json();
+                    if(resp.ok) {
+                        row.remove();
+                        if(document.querySelectorAll('#searchResults .scrobble-item').length === 0) {
+                            document.getElementById('searchResults').innerHTML = '<div class="empty-message">No scrobbles found.</div>';
+                        }
+                    } else alert(`Error: ${data.error}`);
+                } catch(err) { alert("Delete failed: "+err); }
+            };
+            btn.addEventListener('click', listener);
+            btn._listener = listener;
         });
-}
+    }
+    function clearSearch() {
+        document.getElementById('searchTrack').value = '';
+        document.getElementById('searchArtist').value = '';
+        document.getElementById('searchAlbum').value = '';
+        document.getElementById('searchPlaylist').value = '';
+        document.getElementById('searchStartDate').value = '';
+        document.getElementById('searchEndDate').value = '';
+        document.getElementById('searchGenre').value = '';
+        document.getElementById('searchResults').innerHTML = '<div class="empty-message">Enter search criteria and click Search.</div>';
+    }
 
-// Attach event listeners
-document.getElementById('loadGenreBtn').addEventListener('click', browseGenre);
-// Optional: also load when dropdown changes
-document.getElementById('genreSelect').addEventListener('change', browseGenre);
-
-// Initial load of genre list
-loadGenreList();
-
-// Attach event listener for the search button and Enter key
-document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
-document.getElementById('artistSearchInput').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') searchArtists();
-});
-    
-    // Attach event listeners
-    document.getElementById('backfillArtistGenresBtn').addEventListener('click', backfillArtistGenres);
-    document.getElementById('backfillAlbumGenresBtn').addEventListener('click', backfillAlbumGenres);
-    
-    const now = new Date();
-    document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
     document.getElementById('backfillGenresBtn').addEventListener('click', backfillGenres);
-    
-    if (localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
-    
+    document.getElementById('backfillArtistGenresBtn').addEventListener('click', backfillArtistGenres);
+    document.getElementById('backfillAlbumGenresBtn').addEventListener('click', backfillAlbumGenres);
+    document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
+    document.getElementById('artistSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchArtists(); });
+    document.getElementById('loadGenreBtn').addEventListener('click', browseGenre);
+    document.getElementById('genreSelect').addEventListener('change', browseGenre);
+    document.getElementById('searchScrobblesBtn').addEventListener('click', searchScrobbles);
+    document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
+
+    const now = new Date();
+    document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    if(localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
     loadReport();
     loadPlaylists();
     loadGenreMappings();
     loadTrendChart();
+    loadGenreList();
+    loadSearchGenres();
 </script>
 </body>
 </html>
