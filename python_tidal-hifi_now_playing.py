@@ -2416,32 +2416,65 @@ MONTHLY_TEMPLATE = """
         document.getElementById('artistSearchInput').value = '';
         document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
     }
-    function searchArtists() {
-        const query = document.getElementById('artistSearchInput').value.trim();
-        const resultsDiv = document.getElementById('artistSearchResults');
-        if(!query) { resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>'; return; }
-        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
-        fetch(`/api/search_artists?q=${encodeURIComponent(query)}`).then(r=>r.json()).then(artists=>{
-            if(!artists.length) { resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>'; return; }
-            fetch('/api/artist_genre_map').then(r=>r.json()).then(mappings=>{
-                resultsDiv.innerHTML = artists.map(artist => {
-                    const existing = mappings.find(m=>m.artist===artist);
-                    const genre = existing ? existing.genre : '';
-                    return `<div class="playlist-item"><span class="playlist-name">${escapeHtml(artist)}</span><input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre"><button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button></div>`;
-                }).join('');
-                document.querySelectorAll('.save-artist-genre-btn').forEach(btn => btn.addEventListener('click', (e)=>{
-                    const artist = btn.getAttribute('data-artist');
-                    const input = btn.parentElement.querySelector('.genre-input');
-                    saveArtistGenre(artist, input.value.trim());
-                }));
-            });
-        }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching artists.</div>'; });
+function searchArtists() {
+    const query = document.getElementById('artistSearchInput').value.trim();
+    const resultsDiv = document.getElementById('artistSearchResults');
+    if (!query) {
+        resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>';
+        return;
     }
-    function saveArtistGenre(artist, genre) {
-        fetch('/api/set_artist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, genre }) })
-            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(e=>alert('Request failed: '+e));
-    }
-
+    resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+    fetch(`/api/search_artists?q=${encodeURIComponent(query)}`)
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        })
+        .then(artists => {
+            if (!artists.length) {
+                resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
+                return;
+            }
+            // Fetch existing genre mappings
+            fetch('/api/artist_genre_map')
+                .then(r => r.json())
+                .then(mappings => {
+                    let html = '';
+                    artists.forEach(artist => {
+                        // Case-insensitive match
+                        const existing = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
+                        const genre = existing ? existing.genre : '';
+                        html += `
+                            <div class="playlist-item" data-artist="${escapeHtml(artist)}">
+                                <span class="playlist-name">${escapeHtml(artist)}</span>
+                                <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                                <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+                    // Attach save handlers
+                    document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
+                        btn.removeEventListener('click', btn._listener);
+                        const listener = (e) => {
+                            const artist = btn.getAttribute('data-artist');
+                            const input = btn.parentElement.querySelector('.genre-input');
+                            const genreVal = input.value.trim();
+                            saveArtistGenre(artist, genreVal);
+                        };
+                        btn.addEventListener('click', listener);
+                        btn._listener = listener;
+                    });
+                })
+                .catch(err => {
+                    console.error("Error fetching artist genre map:", err);
+                    resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`;
+                });
+        })
+        .catch(err => {
+            console.error("Artist search error:", err);
+            resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
+        });
+}
     // Album genre tagging functions
     function clearAlbumSearch() {
         document.getElementById('albumSearchInput').value = '';
