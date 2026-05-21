@@ -1555,6 +1555,91 @@ function tagAlbum() {
 
 document.getElementById('tagArtistBtn').addEventListener('click', tagArtist);
 document.getElementById('tagAlbumBtn').addEventListener('click', tagAlbum);
+
+// RateYourMusic button for Now Playing page
+(function() {
+    function addButton() {
+        const card = document.querySelector('.card');
+        if (!card || document.getElementById('rymButton')) return;
+        const btn = document.createElement('button');
+        btn.id = 'rymButton';
+        btn.innerHTML = '🎵 RYM';
+        btn.title = 'Search on RateYourMusic';
+        Object.assign(btn.style, {
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(4px)',
+            border: 'none',
+            borderRadius: '20px',
+            padding: '4px 10px',
+            fontSize: '0.7rem',
+            cursor: 'pointer',
+            color: 'white',
+            fontFamily: 'inherit',
+            zIndex: '100',
+            transition: 'background 0.2s'
+        });
+        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
+        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
+        if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+        card.appendChild(btn);
+        btn.addEventListener('click', () => {
+            const artist = document.getElementById('artist').innerText;
+            const album = document.getElementById('album').innerText;
+            if (!artist || artist === '-') { alert('No artist playing'); return; }
+            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
+            window.open(url, '_blank');
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
+    else addButton();
+    setTimeout(addButton, 1000);
+})();
+
+// RateYourMusic button for Now Playing page
+(function() {
+    function addButton() {
+        const card = document.querySelector('.card');
+        if (!card || document.getElementById('rymButton')) return;
+        const btn = document.createElement('button');
+        btn.id = 'rymButton';
+        btn.innerHTML = '🎵 RYM';
+        btn.title = 'Search on RateYourMusic';
+        Object.assign(btn.style, {
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(4px)',
+            border: 'none',
+            borderRadius: '20px',
+            padding: '4px 10px',
+            fontSize: '0.7rem',
+            cursor: 'pointer',
+            color: 'white',
+            fontFamily: 'inherit',
+            zIndex: '100',
+            transition: 'background 0.2s'
+        });
+        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
+        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
+        if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+        card.appendChild(btn);
+        btn.addEventListener('click', () => {
+            const artist = document.getElementById('artist').innerText;
+            const album = document.getElementById('album').innerText;
+            if (!artist || artist === '-') { alert('No artist playing'); return; }
+            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
+            window.open(url, '_blank');
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
+    else addButton();
+    setTimeout(addButton, 1000);
+})();
+
 </script>
 </body>
 </html>
@@ -2097,6 +2182,91 @@ SCROBBLES_TEMPLATE = """
     fetchGenreDistribution();  // initial load
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
+    
+// RateYourMusic button for Scrobble Overview page
+(function() {
+    function addButton() {
+        const container = document.querySelector('.now-playing');
+        if (!container || document.getElementById('rymButtonOverview')) return;
+        const btn = document.createElement('button');
+        btn.id = 'rymButtonOverview';
+        btn.innerHTML = '🎵 RYM';
+        btn.title = 'Search on RateYourMusic';
+        Object.assign(btn.style, {
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(4px)',
+            border: 'none',
+            borderRadius: '20px',
+            padding: '4px 10px',
+            fontSize: '0.7rem',
+            cursor: 'pointer',
+            color: 'white',
+            fontFamily: 'inherit',
+            zIndex: '100',
+            transition: 'background 0.2s'
+        });
+        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
+        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
+        if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
+        container.appendChild(btn);
+        btn.addEventListener('click', () => {
+            const artist = document.getElementById('nowArtist').innerText;
+            const album = document.getElementById('nowAlbum').innerText;
+            if (!artist || artist === '-') { alert('No artist playing'); return; }
+            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
+            window.open(url, '_blank');
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
+    else addButton();
+    setTimeout(addButton, 1000);
+})();
+
+// RateYourMusic button for Scrobble Overview page
+(function() {
+    function addButton() {
+        const container = document.querySelector('.now-playing');
+        if (!container || document.getElementById('rymButtonOverview')) return;
+        const btn = document.createElement('button');
+        btn.id = 'rymButtonOverview';
+        btn.innerHTML = '🎵 RYM';
+        btn.title = 'Search on RateYourMusic';
+        Object.assign(btn.style, {
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(4px)',
+            border: 'none',
+            borderRadius: '20px',
+            padding: '4px 10px',
+            fontSize: '0.7rem',
+            cursor: 'pointer',
+            color: 'white',
+            fontFamily: 'inherit',
+            zIndex: '100',
+            transition: 'background 0.2s'
+        });
+        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
+        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
+        if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
+        container.appendChild(btn);
+        btn.addEventListener('click', () => {
+            const artist = document.getElementById('nowArtist').innerText;
+            const album = document.getElementById('nowAlbum').innerText;
+            if (!artist || artist === '-') { alert('No artist playing'); return; }
+            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
+            window.open(url, '_blank');
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
+    else addButton();
+    setTimeout(addButton, 1000);
+})();
+
 </script>
 </body>
 </html>
