@@ -49,7 +49,7 @@ session = {
 }
 
 # Playlists to ignore (do not store playlist name, treat as album)
-IGNORED_PLAYLISTS = {"Top Tracks", "Mix"}  # add any others you want to ignore
+IGNORED_PLAYLISTS = {"Top Tracks", "Mix", "My Daily Discovery"}  # add any others you want to ignore
 
 # ------------------------- LAST.FM INTEGRATION -------------------------
 def get_lastfm_credentials():
