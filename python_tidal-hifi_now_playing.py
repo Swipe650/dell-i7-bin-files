@@ -1713,6 +1713,7 @@ SCROBBLES_TEMPLATE = """
             --hover-row: #2a2a2a;
             --shadow: rgba(0,0,0,0.3);
             --art-bg: #2c2c2c;
+            --hover-row: #2a2a2a;
         }
         * { box-sizing: border-box; }
         body {
@@ -1764,7 +1765,13 @@ SCROBBLES_TEMPLATE = """
         .theme-toggle { background: var(--button-bg); border: 1px solid var(--button-border); border-radius: 30px; padding: 0.5rem 1rem; font-size: 0.8rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
         .scrobble-list { background: var(--bg-card); border-radius: 16px; box-shadow: 0 1px 4px var(--shadow); overflow: hidden; border: 1px solid var(--border-card); margin-top: 1rem; }
         .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
-        .scrobble-item:hover { background: var(--hover-row); }
+        .scrobble-item:hover {
+            background: #f0f0f0 !important;
+        }
+        body.dark .scrobble-item:hover {
+            background: #2a2a2a !important;
+        }
+        .scrobble-item:hover { background: var(--hover-row, #fef9f9); }
         .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--art-bg); box-shadow: 0 1px 2px var(--shadow); }
         .track-info { flex: 1; min-width: 0; }
         .track-name { font-weight: 600; font-size: 1rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2316,6 +2323,7 @@ MONTHLY_TEMPLATE = """
             --button-border: #ddd;
             --button-hover: #e9e9e9;
             --shadow: rgba(0,0,0,0.05);
+            --hover-row: #fef9f9;
         }
         body.dark {
             --bg-body: #121212;
@@ -2453,6 +2461,12 @@ MONTHLY_TEMPLATE = """
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
         @media (max-width: 700px) { .stats-trend-row { flex-direction: column; } }
         .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
+        .scrobble-item:hover {
+            background: #f0f0f0 !important;
+        }
+        body.dark .scrobble-item:hover {
+            background: #2a2a2a !important;
+        }
         .scrobble-item:hover { background: var(--hover-row, #fef9f9); }
         .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: #f0f0f0; }
         body.dark .album-art { background: #2c2c2c; }
