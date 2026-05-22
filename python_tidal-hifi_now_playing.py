@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 import eventlet
+
+import logging
+
+# Patch logging's internal weakref callback to ignore greenlet finalization
+_original_removeHandlerRef = logging._removeHandlerRef
+def _safe_removeHandlerRef(wr):
+    try:
+        _original_removeHandlerRef(wr)
+    except RuntimeError:
+        pass  # ignore greenlet finalization error
+logging._removeHandlerRef = _safe_removeHandlerRef
+
 eventlet.monkey_patch()
 
 import time
@@ -17,6 +29,8 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
+
+
 
 # ------------------------- CONFIGURATION -------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2339,8 +2353,16 @@ MONTHLY_TEMPLATE = """
         .back-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .controls { margin-bottom: 1.5rem; }
         .month-picker-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; }
-        input, select { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary); }
-        button { background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white; font-weight: bold; }
+        select, button {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-card);
+            background: var(--button-bg);
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        button { background: var(--accent); border: none; color: white; font-weight: bold; }
         .stats-trend-row {
             display: flex;
             flex-wrap: wrap;
@@ -2390,13 +2412,7 @@ MONTHLY_TEMPLATE = """
             padding: 8px 0;
             border-bottom: 1px solid var(--border-card);
         }
-        .playlist-name {
-            flex: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            padding-right: 1rem;
-        }
+        .playlist-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
         .edit-playlist-btn, .save-genre-btn, .save-artist-genre-btn {
             background: var(--button-bg);
             border: 1px solid var(--button-border);
@@ -2407,13 +2423,8 @@ MONTHLY_TEMPLATE = """
             transition: all 0.2s;
             color: var(--text-primary);
         }
-        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover {
-            background: var(--button-hover);
-        }
-        .save-genre-btn, .save-artist-genre-btn {
-            background: var(--accent);
-            color: white;
-        }
+        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover { background: var(--button-hover); }
+        .save-genre-btn, .save-artist-genre-btn { background: var(--accent); color: white; }
         .genre-input {
             background: var(--button-bg);
             border: 1px solid var(--button-border);
@@ -2435,9 +2446,7 @@ MONTHLY_TEMPLATE = """
         }
         canvas { max-height: 300px; margin-top: 1rem; }
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
-        @media (max-width: 700px) {
-            .stats-trend-row { flex-direction: column; }
-        }
+        @media (max-width: 700px) { .stats-trend-row { flex-direction: column; } }
         .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
         .scrobble-item:hover { background: var(--hover-row, #fef9f9); }
         .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: #f0f0f0; }
@@ -2473,7 +2482,8 @@ MONTHLY_TEMPLATE = """
 
     <div class="controls">
         <div class="month-picker-row">
-            <input type="month" id="monthPicker" value="2025-05">
+            <select id="yearSelect"></select>
+            <select id="monthSelect"></select>
             <button id="loadReportBtn">Generate Report</button>
         </div>
     </div>
@@ -2505,9 +2515,7 @@ MONTHLY_TEMPLATE = """
             <button id="searchArtistBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
             <button id="clearArtistSearchBtn" style="background: #6c757d; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Clear</button>
         </div>
-        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;">
-            <div class="empty-message">Search for an artist to assign a genre.</div>
-        </div>
+        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Search for an artist to assign a genre.</div></div>
     </div>
 
     <!-- Browse by Genre -->
@@ -2547,14 +2555,14 @@ MONTHLY_TEMPLATE = """
         <div id="searchResults" style="margin-top: 1rem;"><div class="empty-message">Enter search criteria and click Search.</div></div>
     </div>
 
-    <!-- Playlist Renaming Tool (moved to bottom) -->
+    <!-- Playlist Renaming Tool -->
     <div class="table-card">
         <h3>📀 Rename Playlists</h3>
         <p class="sub" style="margin-bottom: 1rem;">Edit any playlist name – all past scrobbles will be updated.</p>
         <div id="playlistList" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Loading playlists...</div></div>
     </div>
 
-    <!-- Genre Tagging Tool (by Playlist) (moved to bottom) -->
+    <!-- Genre Tagging Tool (by Playlist) -->
     <div class="table-card">
         <h3>🏷️ Genre Tagging (by Playlist)</h3>
         <p class="sub" style="margin-bottom: 1rem;">Assign a genre to each playlist – all scrobbles from that playlist will be tagged.</p>
@@ -2573,10 +2581,33 @@ MONTHLY_TEMPLATE = """
     let clockChart = null;
     let trendChart = null;
 
+    // Populate year and month dropdowns
+    function populateDateSelects() {
+        const yearSelect = document.getElementById('yearSelect');
+        const monthSelect = document.getElementById('monthSelect');
+        if (!yearSelect || !monthSelect) return;
+        const currentYear = new Date().getFullYear();
+        for (let y = 2020; y <= currentYear + 1; y++) {
+            const option = document.createElement('option');
+            option.value = y;
+            option.textContent = y;
+            if (y === currentYear) option.selected = true;
+            yearSelect.appendChild(option);
+        }
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        for (let m = 0; m < monthNames.length; m++) {
+            const option = document.createElement('option');
+            option.value = m + 1;
+            option.textContent = monthNames[m];
+            if (m === new Date().getMonth()) option.selected = true;
+            monthSelect.appendChild(option);
+        }
+    }
+
     async function loadReport() {
-        const monthInput = document.getElementById('monthPicker').value;
-        if (!monthInput) return;
-        const [year, month] = monthInput.split('-');
+        const year = document.getElementById('yearSelect').value;
+        const month = document.getElementById('monthSelect').value;
+        if (!year || !month) return;
         const contentDiv = document.getElementById('reportContent');
         const loadingMsg = document.getElementById('loadingMsg');
         loadingMsg.style.display = 'block';
@@ -2591,7 +2622,11 @@ MONTHLY_TEMPLATE = """
             document.getElementById('totalHours').innerText = data.total_hours;
             const ctx = document.getElementById('clockChart').getContext('2d');
             if (clockChart) clockChart.destroy();
-            clockChart = new Chart(ctx, { type: 'bar', data: { labels: Array.from({length:24},(_,i)=>`${i}:00`), datasets: [{ label: 'Scrobbles', data: data.hour_counts, backgroundColor: '#36a2eb', borderRadius: 4 }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+            clockChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: Array.from({length:24},(_,i)=>`${i}:00`), datasets: [{ label: 'Scrobbles', data: data.hour_counts, backgroundColor: '#36a2eb', borderRadius: 4 }] },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
             loadingMsg.style.display = 'none';
             contentDiv.style.display = 'block';
         } catch(err) {
@@ -2604,7 +2639,10 @@ MONTHLY_TEMPLATE = """
         fetch('/api/monthly_trend').then(r=>r.json()).then(data=>{
             const ctx = document.getElementById('trendChart').getContext('2d');
             if(trendChart) trendChart.destroy();
-            trendChart = new Chart(ctx, { type: 'bar', data: { labels: data.map(d=>d.month), datasets: [{ label: 'Scrobbles', data: data.map(d=>d.scrobbles), backgroundColor: '#36a2eb', borderRadius: 4 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } });
+            trendChart = new Chart(ctx, {
+                type: 'bar', data: { labels: data.map(d=>d.month), datasets: [{ label: 'Scrobbles', data: data.map(d=>d.scrobbles), backgroundColor: '#36a2eb', borderRadius: 4 }] },
+                options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
         }).catch(e=>console.error(e));
     }
 
@@ -2663,7 +2701,6 @@ MONTHLY_TEMPLATE = """
     function backfillArtistGenres() { if(!confirm("Update all past scrobbles with artist genre mappings?")) return; fetch('/api/backfill_artist_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Artist backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
     function backfillAlbumGenres() { if(!confirm("Update all past scrobbles with album genre mappings?")) return; fetch('/api/backfill_album_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Album backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
 
-    // Artist genre tagging functions
     function clearArtistSearch() {
         document.getElementById('artistSearchInput').value = '';
         document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
@@ -2671,73 +2708,43 @@ MONTHLY_TEMPLATE = """
     function searchArtists() {
         const query = document.getElementById('artistSearchInput').value.trim();
         const resultsDiv = document.getElementById('artistSearchResults');
-        if (!query) {
-            resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>';
-            return;
-        }
+        if (!query) { resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>'; return; }
         resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
         fetch(`/api/search_artists?q=${encodeURIComponent(query)}`)
             .then(response => response.json())
             .then(artistsData => {
-                if (!artistsData.length) {
-                    resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
-                    return;
-                }
-                fetch('/api/artist_genre_map')
-                    .then(r => r.json())
-                    .then(mappings => {
-                        let html = '';
-                        artistsData.forEach(item => {
-                            const artist = item.artist;
-                            const suggested = item.suggestedGenre || '';
-                            const existingMapping = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
-                            const genre = existingMapping ? existingMapping.genre : suggested;
-                            html += `
-                                <div class="playlist-item" data-artist="${escapeHtml(artist)}">
-                                    <span class="playlist-name">${escapeHtml(artist)}</span>
-                                    <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
-                                    <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
-                                </div>
-                            `;
-                        });
-                        resultsDiv.innerHTML = html;
-                        document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
-                            btn.removeEventListener('click', btn._listener);
-                            const listener = (e) => {
-                                const artist = btn.getAttribute('data-artist');
-                                const input = btn.parentElement.querySelector('.genre-input');
-                                saveArtistGenre(artist, input.value.trim());
-                            };
-                            btn.addEventListener('click', listener);
-                            btn._listener = listener;
-                        });
-                    })
-                    .catch(err => {
-                        console.error("Error fetching artist genre map:", err);
-                        resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`;
+                if (!artistsData.length) { resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>'; return; }
+                fetch('/api/artist_genre_map').then(r=>r.json()).then(mappings => {
+                    let html = '';
+                    artistsData.forEach(item => {
+                        const artist = item.artist;
+                        const suggested = item.suggestedGenre || '';
+                        const existingMapping = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
+                        const genre = existingMapping ? existingMapping.genre : suggested;
+                        html += `<div class="playlist-item" data-artist="${escapeHtml(artist)}">
+                            <span class="playlist-name">${escapeHtml(artist)}</span>
+                            <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
+                            <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
+                        </div>`;
                     });
-            })
-            .catch(err => {
-                console.error("Artist search error:", err);
-                resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
-            });
+                    resultsDiv.innerHTML = html;
+                    document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
+                        btn.removeEventListener('click', btn._listener);
+                        const listener = (e) => {
+                            const artist = btn.getAttribute('data-artist');
+                            const input = btn.parentElement.querySelector('.genre-input');
+                            saveArtistGenre(artist, input.value.trim());
+                        };
+                        btn.addEventListener('click', listener);
+                        btn._listener = listener;
+                    });
+                }).catch(err => { resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`; });
+            }).catch(err => { resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`; });
     }
     function saveArtistGenre(artist, genre) {
-        fetch('/api/set_artist_genre', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ artist, genre })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) alert('Error: ' + data.error);
-            else alert(`Genre for "${artist}" saved.`);
-            searchArtists(); // refresh results
-        })
-        .catch(err => alert('Request failed: ' + err.message));
+        fetch('/api/set_artist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, genre }) })
+            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(err=>alert('Request failed: '+err.message));
     }
-
-    // Album genre tagging functions (if present) - omitted for brevity; keep existing ones
 
     function loadGenreList() {
         fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
@@ -2770,19 +2777,16 @@ MONTHLY_TEMPLATE = """
         }).catch(e=>console.error(e));
     }
     function loadPlaylistDropdown() {
-        fetch('/api/playlists')
-            .then(r => r.json())
-            .then(playlists => {
-                const select = document.getElementById('searchPlaylist');
-                select.innerHTML = '<option value="">All</option>';
-                playlists.forEach(playlist => {
-                    const option = document.createElement('option');
-                    option.value = playlist;
-                    option.textContent = playlist;
-                    select.appendChild(option);
-                });
-            })
-            .catch(e => console.error('Error loading playlists:', e));
+        fetch('/api/playlists').then(r=>r.json()).then(playlists=>{
+            const select = document.getElementById('searchPlaylist');
+            select.innerHTML = '<option value="">All</option>';
+            playlists.forEach(playlist => {
+                const option = document.createElement('option');
+                option.value = playlist;
+                option.textContent = playlist;
+                select.appendChild(option);
+            });
+        }).catch(e => console.error('Error loading playlists:', e));
     }
     function searchScrobbles() {
         const params = new URLSearchParams();
@@ -2865,8 +2869,10 @@ MONTHLY_TEMPLATE = """
     document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
 
     const now = new Date();
-    document.getElementById('monthPicker').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     if(localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
+
+    // Initialize
+    populateDateSelects();
     loadReport();
     loadPlaylists();
     loadGenreMappings();
