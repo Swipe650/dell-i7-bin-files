@@ -501,17 +501,20 @@ def background_poller():
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     session["last_track_data"] = None
-                if track_changed or not session["last_track_data"]:
-                    track_start_timestamp = int(time.time())
-                    session["track_start_timestamp"] = track_start_timestamp
-                    # Get data from current_track_data (updated by fetch_http_details)
-                    playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-                    album_name = current_track_data.get("album", "")
-                    # ---- FIX: normalised comparison ----
-                    if playing_from.strip().lower() == album_name.strip().lower():
-                        playlist_name_at_start = None
-                    else:
-                        playlist_name_at_start = playing_from
+                # When track changes, give API a moment to refresh
+                if track_changed:
+                    eventlet.sleep(0.2)
+                    fetch_http_details()
+                track_start_timestamp = int(time.time())
+                session["track_start_timestamp"] = track_start_timestamp
+                playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+                album_name = meta["album"]   # use playerctl album, more reliable
+                # Normalise and compare
+                if playing_from.strip().lower() == album_name.strip().lower():
+                    playlist_name_at_start = None
+                else:
+                    playlist_name_at_start = playing_from
+                # ... rest of the block (ignored playlists, unknown check, etc.)
                     # Apply ignored playlists
                     if playlist_name_at_start and playlist_name_at_start in IGNORED_PLAYLISTS:
                         playlist_name_at_start = None
@@ -915,9 +918,9 @@ def scrobble_now():
     with session["lock"]:
         if session["last_track_data"] and session["last_track_data"]["track"]:
             ld = session["last_track_data"]
-            # playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-            # album_name = current_track_data.get("album", "")
-            # playlist_name = None
+            playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+            album_name = current_track_data.get("album", "")
+            playlist_name = None
             if playing_from != album_name and playing_from not in IGNORED_PLAYLISTS:
                 playlist_name = playing_from
             add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
