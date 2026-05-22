@@ -1752,9 +1752,12 @@ SCROBBLES_TEMPLATE = """
         .time-card { background: var(--bg-card); border-radius: 16px; padding: 0.6rem 1rem; margin-bottom: 1.5rem; text-align: center; box-shadow: 0 1px 4px var(--shadow); border: 1px solid var(--border-card); }
         .time-stats { display: flex; justify-content: space-around; flex-wrap: wrap; gap: 0.5rem; margin-top: 0; }
         .time-item { text-align: center; min-width: 70px; }
+        .total-item { text-align: center; margin-top: 0.5rem; }
+        .total-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+        .total-value { font-size: 1.2rem; font-weight: 600; color: var(--accent); }
         .time-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
         .time-value { font-size: 1.2rem; font-weight: 600; color: var(--accent); }
-        .total-scrobbles { text-align: center; font-size: 0.8rem; margin-top: 0.3rem; color: var(--text-muted); }
+        .total-scrobbles { text-align: center; font-size: 1.1rem; margin-top: 0.3rem; color: var(--accent); font-weight: 600; }
         .tools { background: var(--bg-tools); border-radius: 12px; padding: 1rem; margin-bottom: 2rem; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; box-shadow: 0 1px 3px var(--shadow); border: 1px solid var(--border-card); }
         .tools button, .tools label { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; font-size: 0.8rem; cursor: pointer; font-family: inherit; transition: all 0.2s; color: var(--text-primary); }
         .tools button:hover, .tools label:hover { background: var(--button-hover); border-color: var(--text-muted); }
@@ -1839,7 +1842,10 @@ SCROBBLES_TEMPLATE = """
             <div class="time-item"><div class="time-label">This Month</div><div class="time-value" id="timeMonth">-</div></div>
             <div class="time-item"><div class="time-label">This Year</div><div class="time-value" id="timeYear">-</div></div>
         </div>
-        <div class="total-scrobbles" id="totalScrobbles"></div>
+        <div class="total-item">
+            <div class="total-label">Total scrobbles</div>
+            <div class="total-value" id="totalScrobbles">0</div>
+        </div>
     </div>
 
     <div class="new-stats-grid">
@@ -1926,8 +1932,7 @@ SCROBBLES_TEMPLATE = """
 
     function fetchStats() {
         fetch('/api/stats').then(r => r.json()).then(data => {
-            document.getElementById('totalScrobbles').innerText = `Total scrobbles: ${data.total_scrobbles}`;
-            
+            document.getElementById('totalScrobbles').innerText = data.total_scrobbles;
             const artistsList = document.getElementById('topArtistsList');
             artistsList.innerHTML = data.top_artists.length ? data.top_artists.map(a => `
                 <li>
