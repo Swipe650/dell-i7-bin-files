@@ -1309,8 +1309,6 @@ def api_backfill_album_genres():
 def api_artists_without_genre():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    # Get distinct artists that have at least one scrobble with NULL or empty genre,
-    # ordered by the most recent scrobble timestamp.
     c.execute("""
         SELECT artist, MAX(timestamp) as last_scrobble
         FROM scrobbles
@@ -1672,55 +1670,6 @@ document.getElementById('tagAlbumBtn').addEventListener('click', tagAlbum);
     setTimeout(addButton, 1000);
 })();
 
-function loadArtistsWithoutGenre() {
-    const container = document.getElementById('noGenreArtistsList');
-    container.innerHTML = '<div class="empty-message">Loading...</div>';
-    fetch('/api/artists_without_genre')
-        .then(r => r.json())
-        .then(artists => {
-            if (artists.length === 0) {
-                container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
-                return;
-            }
-            let html = '<ul class="stat-list" style="max-height: 200px;">';
-            artists.forEach(artist => {
-                html += `<li style="cursor:pointer; padding: 4px 0;" onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">${escapeHtml(artist)}</li>`;
-            });
-            html += '</ul>';
-            container.innerHTML = html;
-        })
-        .catch(e => {
-            console.error(e);
-            container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
-        });
-}
-
-function saveArtistFromDropdown() {
-    const artist = document.getElementById('artistNameInput').value.trim();
-    const genre = document.getElementById('genreSelectDropdown').value;
-    if (!artist) {
-        alert("Please enter an artist name.");
-        return;
-    }
-    if (!genre) {
-        alert("Please select a genre.");
-        return;
-    }
-    fetch('/api/set_artist_genre', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist, genre })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) alert('Error: ' + data.error);
-        else alert(`Genre "${genre}" saved for artist "${artist}".`);
-        // Optionally refresh the list of artists without genre
-        loadArtistsWithoutGenre();
-        // Also refresh the other artist search results if needed
-    })
-    .catch(err => alert('Request failed: ' + err.message));
-}
 
 </script>
 </body>
@@ -2622,6 +2571,7 @@ MONTHLY_TEMPLATE = """
             </div>
             <div>
                 <button id="saveArtistGenreDropdown" class="backfill-btn" style="background: var(--accent);">Save Genre</button>
+                <button id="clearArtistDropdownBtn" class="backfill-btn" style="background: #6c757d; margin-left: 5px;">Clear</button>
             </div>
         </div>
         <div>
@@ -2630,7 +2580,7 @@ MONTHLY_TEMPLATE = """
                 <div class="empty-message">Loading...</div>
             </div>
         </div>
-    </div>    
+    </div>
 
     <!-- Browse by Genre -->
     <div class="table-card">
@@ -2860,6 +2810,33 @@ MONTHLY_TEMPLATE = """
             .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(err=>alert('Request failed: '+err.message));
     }
 
+    function saveArtistFromDropdown() {
+        const artist = document.getElementById('artistNameInput').value.trim();
+        const genre = document.getElementById('genreSelectDropdown').value;
+        if (!artist) {
+            alert("Please enter an artist name.");
+            return;
+        }
+        if (!genre) {
+            alert("Please select a genre.");
+            return;
+        }
+        fetch('/api/set_artist_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist, genre })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else alert(`Genre "${genre}" saved for artist "${artist}".`);
+            // Optionally refresh the list of artists without genre
+            loadArtistsWithoutGenre();
+            // Also refresh the other artist search results if needed
+        })
+        .catch(err => alert('Request failed: ' + err.message));
+    }
+
     function loadGenreList() {
         fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
             const select = document.getElementById('genreSelect');
@@ -2970,21 +2947,49 @@ MONTHLY_TEMPLATE = """
         document.getElementById('searchResults').innerHTML = '<div class="empty-message">Enter search criteria and click Search.</div>';
     }
     
-    function populateGenreDropdown() {
-        fetch('/api/genre_list')
-            .then(r => r.json())
-            .then(genres => {
-                const select = document.getElementById('genreSelectDropdown');
-                select.innerHTML = '<option value="">-- Select a genre --</option>';
-                genres.forEach(genre => {
-                    const option = document.createElement('option');
-                    option.value = genre;
-                    option.textContent = genre;
-                    select.appendChild(option);
-                });
-            })
-            .catch(e => console.error('Error loading genres:', e));
-    }
+function populateGenreDropdown() {
+    fetch('/api/genre_list')
+        .then(r => r.json())
+        .then(genres => {
+            const select = document.getElementById('genreSelectDropdown');
+            select.innerHTML = '<option value="">-- Select a genre --</option>';
+            genres.forEach(genre => {
+                const option = document.createElement('option');
+                option.value = genre;
+                option.textContent = genre;
+                select.appendChild(option);
+            });
+        })
+        .catch(e => console.error('Error loading genres:', e));
+}
+
+function loadArtistsWithoutGenre() {
+    const container = document.getElementById('noGenreArtistsList');
+    container.innerHTML = '<div class="empty-message">Loading...</div>';
+    fetch('/api/artists_without_genre')
+        .then(r => r.json())
+        .then(artists => {
+            if (artists.length === 0) {
+                container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
+                return;
+            }
+            let html = '<ul class="stat-list" style="max-height: 200px;">';
+            artists.forEach(artist => {
+                html += `<li style="cursor:pointer; padding: 4px 0;" onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">${escapeHtml(artist)}</li>`;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
+        })
+        .catch(e => {
+            console.error(e);
+            container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
+        });
+}
+
+function clearArtistDropdown() {
+    document.getElementById('artistNameInput').value = '';
+    document.getElementById('genreSelectDropdown').value = '';
+}
 
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
     document.getElementById('backfillGenresBtn').addEventListener('click', backfillGenres);
@@ -3013,6 +3018,7 @@ MONTHLY_TEMPLATE = """
     populateGenreDropdown();
     loadArtistsWithoutGenre();
     document.getElementById('saveArtistGenreDropdown').addEventListener('click', saveArtistFromDropdown);
+    document.getElementById('clearArtistDropdownBtn').addEventListener('click', clearArtistDropdown);
 
 </script>
 </body>
