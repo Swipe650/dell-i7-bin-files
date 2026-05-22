@@ -205,16 +205,31 @@ def migrate_album_genre_db():
 
 def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
     timestamp = int(time.time())
-    # Look up genre from mapping if playlist exists
     genre = None
-    if playlist:
-        conn = sqlite3.connect(DATABASE)
-        c = conn.cursor()
-        c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
-        row = c.fetchone()
-        if row:
-            genre = row[0]
-        conn.close()
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
+    # 1. Artist genre (highest priority)
+    c.execute("SELECT genre FROM artist_genre_map WHERE artist = ?", (artist,))
+    row = c.fetchone()
+    if row:
+        genre = row[0]
+    else:
+        # 2. Album genre (artist + album)
+        if album:
+            c.execute("SELECT genre FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
+            row = c.fetchone()
+            if row:
+                genre = row[0]
+        # 3. Playlist genre (lowest priority)
+        if not genre and playlist:
+            c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
+            row = c.fetchone()
+            if row:
+                genre = row[0]
+    conn.close()
+    
+    # Insert into scrobbles (including the determined genre)
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute('''INSERT INTO scrobbles 
@@ -224,7 +239,7 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
     conn.commit()
     conn.close()
     print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else "") + (f" [genre: {genre}]" if genre else ""))
-    # Send to Last.fm
+    # Send to Last.fm (unchanged)
     network = get_lastfm_network()
     if network:
         scrobble_to_lastfm(network, artist, track, album, timestamp)
@@ -482,28 +497,33 @@ def background_poller():
                         playlist_name = ld.get("playlist_name")
                         add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
                                      ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
-                    # --- FIX: ALWAYS reset, not just when scrobbled ---
+                    # ALWAYS reset these
                     session["track_start_time"] = time.time()
                     session["max_position"] = 0
                     session["last_track_data"] = None
                 if track_changed or not session["last_track_data"]:
                     track_start_timestamp = int(time.time())
                     session["track_start_timestamp"] = track_start_timestamp
+                    # Get data from current_track_data (updated by fetch_http_details)
                     playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
                     album_name = current_track_data.get("album", "")
-                    playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-                    album_name = current_track_data.get("album", "")
-                    playlist_name_at_start = playing_from if playing_from != album_name else None
-                    # Apply IGNORED_PLAYLISTS
+                    # ---- FIX: normalised comparison ----
+                    if playing_from.strip().lower() == album_name.strip().lower():
+                        playlist_name_at_start = None
+                    else:
+                        playlist_name_at_start = playing_from
+                    # Apply ignored playlists
                     if playlist_name_at_start and playlist_name_at_start in IGNORED_PLAYLISTS:
                         playlist_name_at_start = None
-                    # Also keep the "unknown" check
+                    # Also ignore "Unknown"
                     if playlist_name_at_start and playlist_name_at_start.strip().lower() == "unknown":
                         playlist_name_at_start = None
+                    # Store track data
                     session["last_track_data"] = {
                         "track": title, "artist": meta["artist"], "album": meta["album"],
                         "playlist_name": playlist_name_at_start,
-                        "art_url": current_track_data.get("art", ""), "duration_sec": meta["duration_sec"],
+                        "art_url": current_track_data.get("art", ""),
+                        "duration_sec": meta["duration_sec"],
                         "quality": current_track_data.get("quality", "low"),
                         "bit_depth": current_track_data.get("bitDepth", 0),
                         "sample_rate": current_track_data.get("sampleRate", 0),
@@ -518,6 +538,7 @@ def background_poller():
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
+            # Update UI display data
             current_track_data["track"] = title
             current_track_data["artist"] = meta["artist"]
             current_track_data["album"] = meta["album"]
@@ -542,7 +563,6 @@ def background_poller():
                 session["last_track_data"]["codec"] = current_track_data.get("codec", session["last_track_data"]["codec"])
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
-
 
 # ------------------------- FLASK ROUTES -------------------------
 @app.route('/favicon.ico')
@@ -895,9 +915,9 @@ def scrobble_now():
     with session["lock"]:
         if session["last_track_data"] and session["last_track_data"]["track"]:
             ld = session["last_track_data"]
-            playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-            album_name = current_track_data.get("album", "")
-            playlist_name = None
+            # playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+            # album_name = current_track_data.get("album", "")
+            # playlist_name = None
             if playing_from != album_name and playing_from not in IGNORED_PLAYLISTS:
                 playlist_name = playing_from
             add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
