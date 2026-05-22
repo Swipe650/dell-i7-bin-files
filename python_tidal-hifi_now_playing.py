@@ -1305,6 +1305,24 @@ def api_backfill_album_genres():
     conn.close()
     return jsonify({"status": "ok", "updated": updated})
 
+@app.route('/api/artists_without_genre')
+def api_artists_without_genre():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    # Get distinct artists that have at least one scrobble with NULL or empty genre,
+    # ordered by the most recent scrobble timestamp.
+    c.execute("""
+        SELECT artist, MAX(timestamp) as last_scrobble
+        FROM scrobbles
+        WHERE genre IS NULL OR genre = ''
+        GROUP BY artist
+        ORDER BY last_scrobble DESC
+        LIMIT 10
+    """)
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([row[0] for row in rows])
+
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -1653,6 +1671,56 @@ document.getElementById('tagAlbumBtn').addEventListener('click', tagAlbum);
     else addButton();
     setTimeout(addButton, 1000);
 })();
+
+function loadArtistsWithoutGenre() {
+    const container = document.getElementById('noGenreArtistsList');
+    container.innerHTML = '<div class="empty-message">Loading...</div>';
+    fetch('/api/artists_without_genre')
+        .then(r => r.json())
+        .then(artists => {
+            if (artists.length === 0) {
+                container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
+                return;
+            }
+            let html = '<ul class="stat-list" style="max-height: 200px;">';
+            artists.forEach(artist => {
+                html += `<li style="cursor:pointer; padding: 4px 0;" onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">${escapeHtml(artist)}</li>`;
+            });
+            html += '</ul>';
+            container.innerHTML = html;
+        })
+        .catch(e => {
+            console.error(e);
+            container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
+        });
+}
+
+function saveArtistFromDropdown() {
+    const artist = document.getElementById('artistNameInput').value.trim();
+    const genre = document.getElementById('genreSelectDropdown').value;
+    if (!artist) {
+        alert("Please enter an artist name.");
+        return;
+    }
+    if (!genre) {
+        alert("Please select a genre.");
+        return;
+    }
+    fetch('/api/set_artist_genre', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist, genre })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) alert('Error: ' + data.error);
+        else alert(`Genre "${genre}" saved for artist "${artist}".`);
+        // Optionally refresh the list of artists without genre
+        loadArtistsWithoutGenre();
+        // Also refresh the other artist search results if needed
+    })
+    .catch(err => alert('Request failed: ' + err.message));
+}
 
 </script>
 </body>
@@ -2536,6 +2604,33 @@ MONTHLY_TEMPLATE = """
         </div>
         <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Search for an artist to assign a genre.</div></div>
     </div>
+    
+    <!-- Tag Artist by Genre (Dropdown version) -->
+    <div class="table-card">
+        <h3>🏷️ Tag Artist via Genre Dropdown</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Assign a genre to an artist using the dropdown of existing genres.</p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem;">
+            <div style="flex: 2; min-width: 200px;">
+                <label>Artist name</label>
+                <input type="text" id="artistNameInput" placeholder="Type artist name..." style="width:100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+            </div>
+            <div style="flex: 1; min-width: 150px;">
+                <label>Genre</label>
+                <select id="genreSelectDropdown" style="width:100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+                    <option value="">-- Select a genre --</option>
+                </select>
+            </div>
+            <div>
+                <button id="saveArtistGenreDropdown" class="backfill-btn" style="background: var(--accent);">Save Genre</button>
+            </div>
+        </div>
+        <div>
+            <p class="sub">Artists with no genre (last 10 scrobbles):</p>
+            <div id="noGenreArtistsList" style="max-height: 200px; overflow-y: auto;">
+                <div class="empty-message">Loading...</div>
+            </div>
+        </div>
+    </div>    
 
     <!-- Browse by Genre -->
     <div class="table-card">
@@ -2874,6 +2969,22 @@ MONTHLY_TEMPLATE = """
         document.getElementById('searchPlaylist').value = '';
         document.getElementById('searchResults').innerHTML = '<div class="empty-message">Enter search criteria and click Search.</div>';
     }
+    
+    function populateGenreDropdown() {
+        fetch('/api/genre_list')
+            .then(r => r.json())
+            .then(genres => {
+                const select = document.getElementById('genreSelectDropdown');
+                select.innerHTML = '<option value="">-- Select a genre --</option>';
+                genres.forEach(genre => {
+                    const option = document.createElement('option');
+                    option.value = genre;
+                    option.textContent = genre;
+                    select.appendChild(option);
+                });
+            })
+            .catch(e => console.error('Error loading genres:', e));
+    }
 
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
     document.getElementById('backfillGenresBtn').addEventListener('click', backfillGenres);
@@ -2899,6 +3010,10 @@ MONTHLY_TEMPLATE = """
     loadGenreList();
     loadSearchGenres();
     loadPlaylistDropdown();
+    populateGenreDropdown();
+    loadArtistsWithoutGenre();
+    document.getElementById('saveArtistGenreDropdown').addEventListener('click', saveArtistFromDropdown);
+
 </script>
 </body>
 </html>
