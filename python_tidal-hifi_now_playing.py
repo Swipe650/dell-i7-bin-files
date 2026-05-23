@@ -261,7 +261,7 @@ def count_scrobbles():
     conn.close()
     return count
 
-def get_top_artists_with_art(limit=25):
+def get_top_artists_with_art(limit=50):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("""
@@ -278,7 +278,7 @@ def get_top_artists_with_art(limit=25):
     conn.close()
     return [{"artist": row[0], "playcount": row[1], "art_url": row[2]} for row in rows]
 
-def get_top_albums_with_art(limit=25):
+def get_top_albums_with_art(limit=50):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("""
@@ -297,7 +297,7 @@ def get_top_albums_with_art(limit=25):
     conn.close()
     return [{"artist": row[0], "album": row[1], "playcount": row[2], "art_url": row[3]} for row in rows]
 
-def get_top_tracks_with_art(limit=25):
+def get_top_tracks_with_art(limit=50):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute("""
@@ -315,7 +315,7 @@ def get_top_tracks_with_art(limit=25):
     conn.close()
     return [{"artist": row[0], "track": row[1], "playcount": row[2], "art_url": row[3]} for row in rows]
 
-def get_top_playlists(limit=25):
+def get_top_playlists(limit=50):
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute('''SELECT playlist, COUNT(*) as count 
@@ -2396,7 +2396,6 @@ MONTHLY_TEMPLATE = """
             --button-border: #ddd;
             --button-hover: #e9e9e9;
             --shadow: rgba(0,0,0,0.05);
-            --hover-row: #fef9f9;
         }
         body.dark {
             --bg-body: #121212;
@@ -2499,7 +2498,7 @@ MONTHLY_TEMPLATE = """
             border-bottom: 1px solid var(--border-card);
         }
         .playlist-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
-        .edit-playlist-btn, .save-genre-btn, .save-artist-genre-btn {
+        .edit-playlist-btn, .save-genre-btn, .save-artist-genre-btn, .save-album-genre-btn {
             background: var(--button-bg);
             border: 1px solid var(--button-border);
             border-radius: 6px;
@@ -2509,15 +2508,15 @@ MONTHLY_TEMPLATE = """
             transition: all 0.2s;
             color: var(--text-primary);
         }
-        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover { background: var(--button-hover); }
-        .save-genre-btn, .save-artist-genre-btn { background: var(--accent); color: white; }
-        .genre-input {
+        .edit-playlist-btn:hover, .save-genre-btn:hover, .save-artist-genre-btn:hover, .save-album-genre-btn:hover { background: var(--button-hover); }
+        .save-genre-btn, .save-artist-genre-btn, .save-album-genre-btn { background: var(--accent); color: white; }
+        .genre-input, .artist-genre-input, .album-genre-input {
             background: var(--button-bg);
             border: 1px solid var(--button-border);
             border-radius: 6px;
             padding: 4px 8px;
             margin: 0 10px;
-            width: 120px;
+            width: 150px;
             color: var(--text-primary);
         }
         .backfill-btn {
@@ -2534,13 +2533,8 @@ MONTHLY_TEMPLATE = """
         footer { margin-top: 3rem; text-align: center; font-size: 0.7rem; color: var(--text-muted); }
         @media (max-width: 700px) { .stats-trend-row { flex-direction: column; } }
         .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
-        .scrobble-item:hover {
-            background: #f0f0f0 !important;
-        }
-        body.dark .scrobble-item:hover {
-            background: #2a2a2a !important;
-        }
-        .scrobble-item:hover { background: var(--hover-row, #fef9f9); }
+        .scrobble-item:hover { background: #f0f0f0 !important; }
+        body.dark .scrobble-item:hover { background: #2a2a2a !important; }
         .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: #f0f0f0; }
         body.dark .album-art { background: #2c2c2c; }
         .track-info { flex: 1; min-width: 0; }
@@ -2598,22 +2592,24 @@ MONTHLY_TEMPLATE = """
 
     <div id="loadingMsg" style="text-align: center; padding: 2rem;">Select a month and click Generate Report.</div>
 
-    <!-- Artist Genre Tagging Tool -->
+    <!-- Card 1: Tag Artist by Genre (search + datalist) -->
     <div class="table-card">
         <h3>🏷️ Tag Artist by Genre</h3>
-        <p class="sub" style="margin-bottom: 1rem;">Search for an artist, then assign a genre (artist genre overrides playlist/album genres).</p>
+        <p class="sub" style="margin-bottom: 1rem;">Search for an artist, then assign a genre (artist genre overrides playlist/album genres). You can type a new genre or select from existing ones.</p>
         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
             <input type="text" id="artistSearchInput" placeholder="Type artist name..." style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
             <button id="searchArtistBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
             <button id="clearArtistSearchBtn" style="background: #6c757d; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Clear</button>
         </div>
-        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Search for an artist to assign a genre.</div></div>
+        <div id="artistSearchResults" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-message">Search for an artist to assign a genre.</div>
+        </div>
     </div>
-    
-    <!-- Tag Artist by Genre (Dropdown version) -->
+
+    <!-- Card 2: Tag Artist via Genre Dropdown (artists without genre) -->
     <div class="table-card">
         <h3>🏷️ Tag Artist via Genre Dropdown</h3>
-        <p class="sub" style="margin-bottom: 1rem;">Assign a genre to an artist using the dropdown of existing genres.</p>
+        <p class="sub" style="margin-bottom: 1rem;">Assign a genre to an artist using the dropdown of existing genres. Also shows artists with no genre for quick tagging.</p>
         <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem;">
             <div style="flex: 2; min-width: 200px;">
                 <label>Artist name</label>
@@ -2638,7 +2634,21 @@ MONTHLY_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Browse by Genre -->
+    <!-- Card 3: Tag Album by Genre (search + datalist) -->
+    <div class="table-card">
+        <h3>🏷️ Tag Album by Genre</h3>
+        <p class="sub" style="margin-bottom: 1rem;">Search for an album, then assign a genre (album genre overrides playlist genre, but is overridden by artist genre). You can type a new genre or select from existing ones.</p>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 1rem;">
+            <input type="text" id="albumSearchInput" placeholder="Type album name..." style="flex: 2; min-width: 200px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+            <button id="searchAlbumBtn" style="background: var(--accent); border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Search</button>
+            <button id="clearAlbumSearchBtn" style="background: #6c757d; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: white;">Clear</button>
+        </div>
+        <div id="albumSearchResults" style="max-height: 300px; overflow-y: auto;">
+            <div class="empty-message">Search for an album to assign a genre.</div>
+        </div>
+    </div>
+
+    <!-- Card 4: Browse by Genre -->
     <div class="table-card">
         <h3>🔍 Browse by Genre</h3>
         <p class="sub" style="margin-bottom: 1rem;">Select a genre to see all artists, albums, and tracks tagged with it.</p>
@@ -2659,7 +2669,7 @@ MONTHLY_TEMPLATE = """
         <div id="genreNoData" style="display: none; text-align: center; padding: 1rem;">Select a genre and click Browse.</div>
     </div>
 
-    <!-- Search Scrobbles Card -->
+    <!-- Card 5: Search Scrobbles -->
     <div class="table-card">
         <h3>🔍 Search Scrobbles</h3>
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;">
@@ -2675,14 +2685,13 @@ MONTHLY_TEMPLATE = """
         <div id="searchResults" style="margin-top: 1rem;"><div class="empty-message">Enter search criteria and click Search.</div></div>
     </div>
 
-    <!-- Playlist Renaming Tool -->
+    <!-- Remaining tools (Rename Playlists, Genre Tagging by Playlist) -->
     <div class="table-card">
         <h3>📀 Rename Playlists</h3>
         <p class="sub" style="margin-bottom: 1rem;">Edit any playlist name – all past scrobbles will be updated.</p>
         <div id="playlistList" style="max-height: 300px; overflow-y: auto;"><div class="empty-message">Loading playlists...</div></div>
     </div>
 
-    <!-- Genre Tagging Tool (by Playlist) -->
     <div class="table-card">
         <h3>🏷️ Genre Tagging (by Playlist)</h3>
         <p class="sub" style="margin-bottom: 1rem;">Assign a genre to each playlist – all scrobbles from that playlist will be tagged.</p>
@@ -2698,6 +2707,14 @@ MONTHLY_TEMPLATE = """
 </div>
 
 <script>
+    // ========== DARK MODE – APPLY IMMEDIATELY ==========
+    (function() {
+        const theme = localStorage.getItem('scrobbleTheme');
+        if (theme === 'dark') {
+            document.body.classList.add('dark');
+        }
+    })();
+
     let clockChart = null;
     let trendChart = null;
 
@@ -2779,6 +2796,7 @@ MONTHLY_TEMPLATE = """
         return new Date(timestamp*1000).toLocaleDateString();
     }
 
+    // ========== PLAYLIST RENAME & GENRE MAPPINGS ==========
     function loadPlaylists() {
         const container = document.getElementById('playlistList');
         container.innerHTML = '<div class="empty-message">Loading playlists...</div>';
@@ -2793,7 +2811,6 @@ MONTHLY_TEMPLATE = """
         fetch('/api/rename_playlist', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ old_name: oldName, new_name: newName }) })
             .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Renamed to "${newName}" (${data.updated} updates).`); loadPlaylists(); loadGenreMappings(); loadTrendChart(); }).catch(e=>alert('Request failed: '+e));
     }
-
     function loadGenreMappings() {
         const container = document.getElementById('genreMappingList');
         container.innerHTML = '<div class="empty-message">Loading...</div>';
@@ -2821,62 +2838,89 @@ MONTHLY_TEMPLATE = """
     function backfillArtistGenres() { if(!confirm("Update all past scrobbles with artist genre mappings?")) return; fetch('/api/backfill_artist_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Artist backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
     function backfillAlbumGenres() { if(!confirm("Update all past scrobbles with album genre mappings?")) return; fetch('/api/backfill_album_genres',{method:'POST'}).then(r=>r.json()).then(data=>alert(`Album backfill complete. ${data.updated} scrobbles updated.`)).catch(e=>alert('Error: '+e)); }
 
+    // ========== ARTIST GENRE TAGGING (search + datalist) ==========
+    const artistDatalist = document.createElement('datalist');
+    artistDatalist.id = 'artistGenreDatalist';
+    document.body.appendChild(artistDatalist);
+    const albumDatalist = document.createElement('datalist');
+    albumDatalist.id = 'albumGenreDatalist';
+    document.body.appendChild(albumDatalist);
+
+    function refreshGenreDatalists() {
+        fetch('/api/genre_list')
+            .then(r => r.json())
+            .then(genres => {
+                const artistDL = document.getElementById('artistGenreDatalist');
+                const albumDL = document.getElementById('albumGenreDatalist');
+                if (artistDL) artistDL.innerHTML = genres.map(g => `<option value="${escapeHtml(g)}">`).join('');
+                if (albumDL) albumDL.innerHTML = genres.map(g => `<option value="${escapeHtml(g)}">`).join('');
+            })
+            .catch(e => console.error('Error refreshing datalists:', e));
+    }
+    refreshGenreDatalists();
+
     function clearArtistSearch() {
         document.getElementById('artistSearchInput').value = '';
         document.getElementById('artistSearchResults').innerHTML = '<div class="empty-message">Search for an artist to assign a genre.</div>';
     }
+
     function searchArtists() {
         const query = document.getElementById('artistSearchInput').value.trim();
         const resultsDiv = document.getElementById('artistSearchResults');
-        if (!query) { resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>'; return; }
+        if (!query) {
+            resultsDiv.innerHTML = '<div class="empty-message">Enter an artist name to search.</div>';
+            return;
+        }
         resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
         fetch(`/api/search_artists?q=${encodeURIComponent(query)}`)
             .then(response => response.json())
             .then(artistsData => {
-                if (!artistsData.length) { resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>'; return; }
-                fetch('/api/artist_genre_map').then(r=>r.json()).then(mappings => {
-                    let html = '';
-                    artistsData.forEach(item => {
-                        const artist = item.artist;
-                        const suggested = item.suggestedGenre || '';
-                        const existingMapping = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
-                        const genre = existingMapping ? existingMapping.genre : suggested;
-                        html += `<div class="playlist-item" data-artist="${escapeHtml(artist)}">
-                            <span class="playlist-name">${escapeHtml(artist)}</span>
-                            <input type="text" class="genre-input" value="${escapeHtml(genre)}" placeholder="Genre">
-                            <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
-                        </div>`;
+                if (!artistsData.length) {
+                    resultsDiv.innerHTML = '<div class="empty-message">No artists found.</div>';
+                    return;
+                }
+                fetch('/api/artist_genre_map')
+                    .then(r => r.json())
+                    .then(mappings => {
+                        let html = '';
+                        artistsData.forEach(item => {
+                            const artist = item.artist;
+                            const suggested = item.suggestedGenre || '';
+                            const existing = mappings.find(m => m.artist.toLowerCase() === artist.toLowerCase());
+                            const genre = existing ? existing.genre : suggested;
+                            html += `
+                                <div class="playlist-item" data-artist="${escapeHtml(artist)}">
+                                    <span class="playlist-name" style="flex:2;">${escapeHtml(artist)}</span>
+                                    <input list="artistGenreDatalist" class="artist-genre-input" value="${escapeHtml(genre)}" placeholder="Type or select genre" style="width: 150px; margin: 0 10px; padding: 4px; border-radius: 6px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+                                    <button class="save-artist-genre-btn" data-artist="${escapeHtml(artist)}">Save</button>
+                                </div>
+                            `;
+                        });
+                        resultsDiv.innerHTML = html;
+                        document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
+                            btn.removeEventListener('click', btn._listener);
+                            const listener = () => {
+                                const artist = btn.getAttribute('data-artist');
+                                const input = btn.parentElement.querySelector('.artist-genre-input');
+                                const genreVal = input.value.trim();
+                                saveArtistGenre(artist, genreVal);
+                            };
+                            btn.addEventListener('click', listener);
+                            btn._listener = listener;
+                        });
+                    })
+                    .catch(err => {
+                        console.error("Error fetching artist genre map:", err);
+                        resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`;
                     });
-                    resultsDiv.innerHTML = html;
-                    document.querySelectorAll('.save-artist-genre-btn').forEach(btn => {
-                        btn.removeEventListener('click', btn._listener);
-                        const listener = (e) => {
-                            const artist = btn.getAttribute('data-artist');
-                            const input = btn.parentElement.querySelector('.genre-input');
-                            saveArtistGenre(artist, input.value.trim());
-                        };
-                        btn.addEventListener('click', listener);
-                        btn._listener = listener;
-                    });
-                }).catch(err => { resultsDiv.innerHTML = `<div class="empty-message">Error loading genre map: ${err.message}</div>`; });
-            }).catch(err => { resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`; });
-    }
-    function saveArtistGenre(artist, genre) {
-        fetch('/api/set_artist_genre', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ artist, genre }) })
-            .then(r=>r.json()).then(data=>{ if(data.error) alert('Error: '+data.error); else alert(`Genre for "${artist}" saved.`); searchArtists(); }).catch(err=>alert('Request failed: '+err.message));
+            })
+            .catch(err => {
+                console.error("Artist search error:", err);
+                resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
+            });
     }
 
-    function saveArtistFromDropdown() {
-        const artist = document.getElementById('artistNameInput').value.trim();
-        const genre = document.getElementById('genreSelectDropdown').value;
-        if (!artist) {
-            alert("Please enter an artist name.");
-            return;
-        }
-        if (!genre) {
-            alert("Please select a genre.");
-            return;
-        }
+    function saveArtistGenre(artist, genre) {
         fetch('/api/set_artist_genre', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2885,14 +2929,165 @@ MONTHLY_TEMPLATE = """
         .then(r => r.json())
         .then(data => {
             if (data.error) alert('Error: ' + data.error);
-            else alert(`Genre "${genre}" saved for artist "${artist}".`);
-            // Optionally refresh the list of artists without genre
-            loadArtistsWithoutGenre();
-            // Also refresh the other artist search results if needed
+            else alert(`Genre for "${artist}" saved.`);
+            searchArtists(); // refresh
+            refreshGenreDatalists();
         })
         .catch(err => alert('Request failed: ' + err.message));
     }
 
+    // ========== TAG ARTIST VIA GENRE DROPDOWN ==========
+    function loadNoGenreArtists() {
+        const container = document.getElementById('noGenreArtistsList');
+        container.innerHTML = '<div class="empty-message">Loading...</div>';
+        fetch('/api/artists_without_genre')
+            .then(r => r.json())
+            .then(artists => {
+                if (artists.length === 0) {
+                    container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
+                    return;
+                }
+                let html = '<ul class="stat-list" style="max-height: 200px;">';
+                artists.forEach(artist => {
+                    html += `<li style="cursor:pointer; padding: 4px 0;" onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">${escapeHtml(artist)}</li>`;
+                });
+                html += '</ul>';
+                container.innerHTML = html;
+            })
+            .catch(e => {
+                console.error(e);
+                container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
+            });
+    }
+
+    function populateGenreDropdown() {
+        fetch('/api/genre_list')
+            .then(r => r.json())
+            .then(genres => {
+                const select = document.getElementById('genreSelectDropdown');
+                select.innerHTML = '<option value="">-- Select a genre --</option>';
+                genres.forEach(genre => {
+                    const option = document.createElement('option');
+                    option.value = genre;
+                    option.textContent = genre;
+                    select.appendChild(option);
+                });
+            })
+            .catch(e => console.error('Error loading genres:', e));
+    }
+
+    function saveArtistFromDropdown() {
+        const artist = document.getElementById('artistNameInput').value.trim();
+        const genre = document.getElementById('genreSelectDropdown').value;
+        if (!artist) { alert("Please enter an artist name."); return; }
+        if (!genre) { alert("Please select a genre."); return; }
+        fetch('/api/set_artist_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist, genre })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else {
+                alert(`Genre "${genre}" saved for artist "${artist}".`);
+                loadNoGenreArtists(); // refresh list
+                document.getElementById('artistNameInput').value = '';
+                document.getElementById('genreSelectDropdown').value = '';
+                refreshGenreDatalists();
+            }
+        })
+        .catch(err => alert('Request failed: ' + err.message));
+    }
+
+    function clearArtistDropdown() {
+        document.getElementById('artistNameInput').value = '';
+        document.getElementById('genreSelectDropdown').value = '';
+    }
+
+    // ========== ALBUM GENRE TAGGING (search + datalist) ==========
+    function clearAlbumSearch() {
+        document.getElementById('albumSearchInput').value = '';
+        document.getElementById('albumSearchResults').innerHTML = '<div class="empty-message">Search for an album to assign a genre.</div>';
+    }
+
+    function searchAlbums() {
+        const query = document.getElementById('albumSearchInput').value.trim();
+        const resultsDiv = document.getElementById('albumSearchResults');
+        if (!query) {
+            resultsDiv.innerHTML = '<div class="empty-message">Enter an album name to search.</div>';
+            return;
+        }
+        resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
+        fetch(`/api/search_albums?q=${encodeURIComponent(query)}`)
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then(albums => {
+                if (!albums.length) {
+                    resultsDiv.innerHTML = '<div class="empty-message">No albums found.</div>';
+                    return;
+                }
+                Promise.all([
+                    fetch('/api/album_genre_map').then(r => r.json()),
+                    fetch('/api/genre_list').then(r => r.json())
+                ])
+                .then(([mappings, genres]) => {
+                    let html = '';
+                    albums.forEach(album => {
+                        const existing = mappings.find(m => m.artist === album.artist && m.album === album.album);
+                        const genre = existing ? existing.genre : '';
+                        html += `
+                            <div class="playlist-item" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">
+                                <span class="playlist-name" style="flex:2;">${escapeHtml(album.artist)} – ${escapeHtml(album.album)}</span>
+                                <input list="albumGenreDatalist" class="album-genre-input" value="${escapeHtml(genre)}" placeholder="Type or select genre" style="width: 150px; margin: 0 10px; padding: 4px; border-radius: 6px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+                                <button class="save-album-genre-btn" data-artist="${escapeHtml(album.artist)}" data-album="${escapeHtml(album.album)}">Save</button>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+                    document.querySelectorAll('.save-album-genre-btn').forEach(btn => {
+                        btn.removeEventListener('click', btn._listener);
+                        const listener = () => {
+                            const artist = btn.getAttribute('data-artist');
+                            const albumName = btn.getAttribute('data-album');
+                            const input = btn.parentElement.querySelector('.album-genre-input');
+                            const genreVal = input.value.trim();
+                            saveAlbumGenre(artist, albumName, genreVal);
+                        };
+                        btn.addEventListener('click', listener);
+                        btn._listener = listener;
+                    });
+                })
+                .catch(err => {
+                    console.error("Error loading data:", err);
+                    resultsDiv.innerHTML = `<div class="empty-message">Error loading genre data: ${err.message}</div>`;
+                });
+            })
+            .catch(err => {
+                console.error("Album search error:", err);
+                resultsDiv.innerHTML = `<div class="empty-message">Search error: ${err.message}</div>`;
+            });
+    }
+
+    function saveAlbumGenre(artist, album, genre) {
+        fetch('/api/set_album_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist, album, genre })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else alert(`Genre for "${album}" saved.`);
+            searchAlbums(); // refresh
+            refreshGenreDatalists();
+        })
+        .catch(e => alert('Request failed: ' + e.message));
+    }
+
+    // ========== BROWSE BY GENRE ==========
     function loadGenreList() {
         fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
             const select = document.getElementById('genreSelect');
@@ -2916,6 +3111,7 @@ MONTHLY_TEMPLATE = """
         }).catch(e=>{ console.error(e); noDataDiv.innerHTML = `Error: ${e.message}`; });
     }
 
+    // ========== SEARCH SCROBBLES ==========
     function loadSearchGenres() {
         fetch('/api/genre_list').then(r=>r.json()).then(genres=>{
             const select = document.getElementById('searchGenre');
@@ -3002,51 +3198,8 @@ MONTHLY_TEMPLATE = """
         document.getElementById('searchPlaylist').value = '';
         document.getElementById('searchResults').innerHTML = '<div class="empty-message">Enter search criteria and click Search.</div>';
     }
-    
-function populateGenreDropdown() {
-    fetch('/api/genre_list')
-        .then(r => r.json())
-        .then(genres => {
-            const select = document.getElementById('genreSelectDropdown');
-            select.innerHTML = '<option value="">-- Select a genre --</option>';
-            genres.forEach(genre => {
-                const option = document.createElement('option');
-                option.value = genre;
-                option.textContent = genre;
-                select.appendChild(option);
-            });
-        })
-        .catch(e => console.error('Error loading genres:', e));
-}
 
-function loadArtistsWithoutGenre() {
-    const container = document.getElementById('noGenreArtistsList');
-    container.innerHTML = '<div class="empty-message">Loading...</div>';
-    fetch('/api/artists_without_genre')
-        .then(r => r.json())
-        .then(artists => {
-            if (artists.length === 0) {
-                container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
-                return;
-            }
-            let html = '<ul class="stat-list" style="max-height: 200px;">';
-            artists.forEach(artist => {
-                html += `<li style="cursor:pointer; padding: 4px 0;" onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">${escapeHtml(artist)}</li>`;
-            });
-            html += '</ul>';
-            container.innerHTML = html;
-        })
-        .catch(e => {
-            console.error(e);
-            container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
-        });
-}
-
-function clearArtistDropdown() {
-    document.getElementById('artistNameInput').value = '';
-    document.getElementById('genreSelectDropdown').value = '';
-}
-
+    // ========== EVENT LISTENERS ==========
     document.getElementById('loadReportBtn').addEventListener('click', loadReport);
     document.getElementById('backfillGenresBtn').addEventListener('click', backfillGenres);
     document.getElementById('backfillArtistGenresBtn').addEventListener('click', backfillArtistGenres);
@@ -3054,15 +3207,17 @@ function clearArtistDropdown() {
     document.getElementById('searchArtistBtn').addEventListener('click', searchArtists);
     document.getElementById('clearArtistSearchBtn').addEventListener('click', clearArtistSearch);
     document.getElementById('artistSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchArtists(); });
+    document.getElementById('searchAlbumBtn').addEventListener('click', searchAlbums);
+    document.getElementById('clearAlbumSearchBtn').addEventListener('click', clearAlbumSearch);
+    document.getElementById('albumSearchInput').addEventListener('keypress', e => { if(e.key==='Enter') searchAlbums(); });
     document.getElementById('loadGenreBtn').addEventListener('click', browseGenre);
     document.getElementById('genreSelect').addEventListener('change', browseGenre);
     document.getElementById('searchScrobblesBtn').addEventListener('click', searchScrobbles);
     document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
+    document.getElementById('saveArtistGenreDropdown').addEventListener('click', saveArtistFromDropdown);
+    document.getElementById('clearArtistDropdownBtn').addEventListener('click', clearArtistDropdown);
 
-    const now = new Date();
-    if(localStorage.getItem('scrobbleTheme') === 'dark') document.body.classList.add('dark');
-
-    // Initialize
+    // Initialise everything
     populateDateSelects();
     loadReport();
     loadPlaylists();
@@ -3072,10 +3227,7 @@ function clearArtistDropdown() {
     loadSearchGenres();
     loadPlaylistDropdown();
     populateGenreDropdown();
-    loadArtistsWithoutGenre();
-    document.getElementById('saveArtistGenreDropdown').addEventListener('click', saveArtistFromDropdown);
-    document.getElementById('clearArtistDropdownBtn').addEventListener('click', clearArtistDropdown);
-
+    loadNoGenreArtists();
 </script>
 </body>
 </html>
