@@ -603,9 +603,9 @@ def api_now():
 
 @app.route('/api/stats')
 def api_stats():
-    top_artists = get_top_artists_with_art(25)
-    top_albums = get_top_albums_with_art(25)
-    top_tracks = get_top_tracks_with_art(25)
+    top_artists = get_top_artists_with_art(50)
+    top_albums = get_top_albums_with_art(50)
+    top_tracks = get_top_tracks_with_art(50)
     total_scrobbles = count_scrobbles()
     return jsonify({
         "top_artists": top_artists,
