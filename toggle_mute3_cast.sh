@@ -5,14 +5,36 @@ google_home="Kitchen home"
 
 CAST_CMD="/home/swipe/bin/cast-linux-amd64 --name \"$google_home\""
 
-mute () { eval $CAST_CMD mute; }
-unmute () { eval $CAST_CMD unmute; }
+# Retry helper: runs a command up to 3 times if it fails
+run_with_retry() {
+    local cmd="$1"
+    local max_retries=3
+    local retry_delay=2
+    local attempt=1
+
+    while [ $attempt -le $max_retries ]; do
+        eval $cmd
+        if [ $? -eq 0 ]; then
+            return 0
+        fi
+        echo "Command failed (attempt $attempt/$max_retries): $cmd" >&2
+        sleep $retry_delay
+        ((attempt++))
+    done
+
+    echo "Command failed after $max_retries attempts: $cmd" >&2
+    #return 1
+    exit 1
+}
+
+mute () { run_with_retry "$CAST_CMD mute"; }
+unmute () { run_with_retry "$CAST_CMD unmute"; }
 
 get_mute_duration() {
-    # Get hour and minute as decimal numbers (strip leading zeros to avoid octal issues)
-    hour=$((10#$(date +%H)))      # 0-23, decimal
-    minute=$((10#$(date +%M)))    # 0-59, decimal
-    dow=$(date +%u)               # 1=Monday ... 7=Sunday (no leading zeros)
+    # Force decimal interpretation to avoid octal errors (08, 09)
+    hour=$((10#$(date +%H)))
+    minute=$((10#$(date +%M)))
+    dow=$(date +%u)                     # 1=Monday ... 7=Sunday
 
     # ----- SPECIAL LBC AFTERNOON RULE (weekdays, 4 PM to 7 PM) -----
     if [[ $hour -ge 16 && $hour -lt 19 ]] && \
@@ -34,19 +56,14 @@ get_mute_duration() {
     fi
 
     # ----- NORMAL TIME‑BASED SCHEDULE -----
-    # 06:00 – 19:00 (every day)
     if [[ $hour -ge 6 && $hour -lt 19 ]]; then
         echo 121
-
-    # 19:00 – 22:00 (weekday/weekend split)
     elif [[ $hour -ge 19 && $hour -lt 22 ]]; then
         if [[ $dow -ge 1 && $dow -le 5 ]]; then
             echo 140
         else
             echo 125
         fi
-
-    # 22:00 – 06:00 (overnight)
     else
         echo 120
     fi
