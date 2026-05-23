@@ -65,6 +65,87 @@ session = {
 # Playlists to ignore (do not store playlist name, treat as album)
 IGNORED_PLAYLISTS = {"Top Tracks", "Mix", "My Daily Discovery"}  # add any others you want to ignore
 
+# ------------------------- BACKUP SYSTEM -------------------------
+import shutil
+import glob
+
+BACKUP_DIR = os.path.join(SCRIPT_DIR, "backups")
+BACKUP_INTERVAL_HOURS = 24          # how often to auto‑backup
+MAX_BACKUPS = 30                    # keep the last N backups
+
+def backup_database():
+    """Create a consistent snapshot of the database using SQLite's backup API."""
+    if not os.path.exists(BACKUP_DIR):
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    backup_filename = f"scrobbles_{timestamp}.db"
+    backup_path = os.path.join(BACKUP_DIR, backup_filename)
+
+    try:
+        src = sqlite3.connect(DATABASE)
+        dst = sqlite3.connect(backup_path)
+        src.backup(dst)
+        dst.close()
+        src.close()
+        print(f"💾 Backup created: {backup_filename}")
+        return backup_path
+    except Exception as e:
+        print(f"❌ Backup failed: {e}")
+        return None
+
+def cleanup_old_backups():
+    """Remove oldest backups exceeding MAX_BACKUPS."""
+    backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "scrobbles_*.db")))
+    while len(backups) > MAX_BACKUPS:
+        oldest = backups.pop(0)
+        try:
+            os.remove(oldest)
+            print(f"🗑️ Removed old backup: {os.path.basename(oldest)}")
+        except OSError as e:
+            print(f"⚠️ Could not delete old backup {oldest}: {e}")
+
+def get_most_recent_backup():
+    """Return the path of the most recent backup file, or None if none exist."""
+    backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "scrobbles_*.db")))
+    return backups[-1] if backups else None
+
+def backup_scheduler():
+    """On startup, backs up immediately, then schedules the next backup 24h later."""
+    print("💾 Performing initial backup on startup...")
+    backup_database()
+    cleanup_old_backups()
+
+    while True:
+        most_recent = get_most_recent_backup()
+        if most_recent:
+            basename = os.path.basename(most_recent)
+            date_str = basename[len("scrobbles_"):-3]  # "YYYY-mm-ddTHH-MM-SS"
+            try:
+                last_backup_time = datetime.strptime(date_str, "%Y-%m-%dT%H-%M-%S")
+            except ValueError:
+                last_backup_time = datetime.fromtimestamp(os.path.getmtime(most_recent))
+        else:
+            last_backup_time = datetime.now()
+
+        next_backup_time = last_backup_time + timedelta(hours=BACKUP_INTERVAL_HOURS)
+        now = datetime.now()
+        seconds_until_next = (next_backup_time - now).total_seconds()
+
+        if seconds_until_next <= 0:
+            print("⏰ Backup time already passed, performing backup now.")
+            backup_database()
+            cleanup_old_backups()
+            continue
+
+        print(f"⏳ Next automatic backup at {next_backup_time.strftime('%Y-%m-%d %H:%M:%S')} "
+              f"(in {seconds_until_next/3600:.1f} hours)")
+        eventlet.sleep(seconds_until_next)
+
+        print("⏰ Performing scheduled backup...")
+        backup_database()
+        cleanup_old_backups()
+
 # ------------------------- LAST.FM INTEGRATION -------------------------
 def get_lastfm_credentials():
     try:
@@ -565,6 +646,15 @@ def background_poller():
         eventlet.sleep(POLL_INTERVAL)
 
 # ------------------------- FLASK ROUTES -------------------------
+@app.route('/backup/now')
+def backup_now():
+    path = backup_database()
+    cleanup_old_backups()
+    if path:
+        return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+    else:
+        return "Backup failed", 500
+
 @app.route('/favicon.ico')
 def favicon():
     return '', 204   # returns no content
@@ -2197,46 +2287,83 @@ SCROBBLES_TEMPLATE = """
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
     
-// RateYourMusic button for Scrobble Overview page
+// RateYourMusic button + Backup button for Scrobble Overview page
 (function() {
-    function addButton() {
+    function addButtons() {
         const container = document.querySelector('.now-playing');
-        if (!container || document.getElementById('rymButtonOverview')) return;
-        const btn = document.createElement('button');
-        btn.id = 'rymButtonOverview';
-        btn.innerHTML = '🎵 RYM';
-        btn.title = 'Search on RateYourMusic';
-        Object.assign(btn.style, {
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            border: 'none',
-            borderRadius: '20px',
-            padding: '4px 10px',
-            fontSize: '0.7rem',
-            cursor: 'pointer',
-            color: 'white',
-            fontFamily: 'inherit',
-            zIndex: '100',
-            transition: 'background 0.2s'
-        });
-        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
-        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
-        if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
-        container.appendChild(btn);
-        btn.addEventListener('click', () => {
-            const artist = document.getElementById('nowArtist').innerText;
-            const album = document.getElementById('nowAlbum').innerText;
-            if (!artist || artist === '-') { alert('No artist playing'); return; }
-            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
-            window.open(url, '_blank');
-        });
+        if (!container) return;
+
+        // --- RYM Button (existing) ---
+        if (!document.getElementById('rymButtonOverview')) {
+            const rymBtn = document.createElement('button');
+            rymBtn.id = 'rymButtonOverview';
+            rymBtn.innerHTML = '🎵 RYM';
+            rymBtn.title = 'Search on RateYourMusic';
+            Object.assign(rymBtn.style, {
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(4px)',
+                border: 'none',
+                borderRadius: '20px',
+                padding: '4px 10px',
+                fontSize: '0.7rem',
+                cursor: 'pointer',
+                color: 'white',
+                fontFamily: 'inherit',
+                zIndex: '100',
+                transition: 'background 0.2s'
+            });
+            rymBtn.addEventListener('mouseenter', () => rymBtn.style.background = 'rgba(0,0,0,0.7)');
+            rymBtn.addEventListener('mouseleave', () => rymBtn.style.background = 'rgba(0,0,0,0.5)');
+            if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
+            container.appendChild(rymBtn);
+            rymBtn.addEventListener('click', () => {
+                const artist = document.getElementById('nowArtist').innerText;
+                const album = document.getElementById('nowAlbum').innerText;
+                if (!artist || artist === '-') { alert('No artist playing'); return; }
+                const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
+                window.open(url, '_blank');
+            });
+        }
+
+        // --- Backup Button (new) ---
+        if (!document.getElementById('backupButtonOverview')) {
+            const backupBtn = document.createElement('button');
+            backupBtn.id = 'backupButtonOverview';
+            backupBtn.innerHTML = '💾 Backup';
+            backupBtn.title = 'Download database backup';
+            Object.assign(backupBtn.style, {
+                position: 'absolute',
+                top: '45px',               // right below the RYM button
+                right: '10px',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(4px)',
+                border: 'none',
+                borderRadius: '20px',
+                padding: '4px 10px',
+                fontSize: '0.7rem',
+                cursor: 'pointer',
+                color: 'white',
+                fontFamily: 'inherit',
+                zIndex: '100',
+                transition: 'background 0.2s'
+            });
+            backupBtn.addEventListener('mouseenter', () => backupBtn.style.background = 'rgba(0,0,0,0.7)');
+            backupBtn.addEventListener('mouseleave', () => backupBtn.style.background = 'rgba(0,0,0,0.5)');
+            // Make sure container is still relative (already done for RYM, but safe)
+            if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
+            container.appendChild(backupBtn);
+            backupBtn.addEventListener('click', () => {
+                window.open('/backup/now', '_blank');
+            });
+        }
     }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
-    else addButton();
-    setTimeout(addButton, 1000);
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButtons);
+    else addButtons();
+    setTimeout(addButtons, 1000);
 })();
 
 </script>
@@ -3115,6 +3242,10 @@ if __name__ == '__main__':
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
+    
+    # Start the backup scheduler as a cooperative greenlet
+    eventlet.spawn(backup_scheduler)
+    
     print(f"✅ TIDAL HIFI FULL SCROBBLER (with genre tagging)")
     print(f"📀 Database: {DATABASE}")
     print("🌐 Player: http://127.0.0.1:5000")
@@ -3122,5 +3253,7 @@ if __name__ == '__main__':
     print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
     
     signal.signal(signal.SIGINT, signal_handler)
+    
+    
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
