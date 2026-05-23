@@ -490,40 +490,43 @@ def background_poller():
         if meta:
             title = meta["track"]
             track_changed = (title != last_title and last_title is not None)
+
             with session["lock"]:
-                if track_changed and session["last_track_data"]:
-                    if maybe_scrobble(session["last_track_data"], session["max_position"], session["last_track_data"]["duration_sec"]):
-                        ld = session["last_track_data"]
-                        playlist_name = ld.get("playlist_name")
-                        add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
-                                     ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
-                    # ALWAYS reset these
-                    session["track_start_time"] = time.time()
-                    session["max_position"] = 0
-                    session["last_track_data"] = None
-                # When track changes, give API a moment to refresh
-                if track_changed:
-                    eventlet.sleep(0.2)
-                    fetch_http_details()
-                track_start_timestamp = int(time.time())
-                session["track_start_timestamp"] = track_start_timestamp
-                playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
-                album_name = meta["album"]   # use playerctl album, more reliable
-                # Normalise and compare
-                if playing_from.strip().lower() == album_name.strip().lower():
-                    playlist_name_at_start = None
-                else:
-                    playlist_name_at_start = playing_from
-                # ... rest of the block (ignored playlists, unknown check, etc.)
+                # --- Handle track change or first track ---
+                if track_changed or last_title is None:
+                    # Scrobble previous track if it exists and meets threshold
+                    if last_title is not None and session["last_track_data"]:
+                        if maybe_scrobble(session["last_track_data"], session["max_position"], session["last_track_data"]["duration_sec"]):
+                            ld = session["last_track_data"]
+                            playlist_name = ld.get("playlist_name")
+                            add_scrobble(ld["track"], ld["artist"], ld["album"], ld["art_url"], ld["duration_sec"],
+                                         ld["quality"], ld["bit_depth"], ld["sample_rate"], ld["codec"], playlist_name)
+                    # --- Initialise new track (always runs on change or first track) ---
+                    # Allow TIDAL API a moment to update after a track change
+                    if track_changed:
+                        eventlet.sleep(0.2)
+                        fetch_http_details()
+                    track_start_timestamp = int(time.time())
+                    session["track_start_timestamp"] = track_start_timestamp
+                    # Get playing_from from the refreshed data
+                    playing_from = current_track_data.get("playing_from", "").replace("Playing from: ", "")
+                    album_name = meta["album"]   # use playerctl album for reliable comparison
+                    # Normalise and compare
+                    if playing_from.strip().lower() == album_name.strip().lower():
+                        playlist_name_at_start = None
+                    else:
+                        playlist_name_at_start = playing_from
                     # Apply ignored playlists
                     if playlist_name_at_start and playlist_name_at_start in IGNORED_PLAYLISTS:
                         playlist_name_at_start = None
-                    # Also ignore "Unknown"
+                    # Ignore "Unknown"
                     if playlist_name_at_start and playlist_name_at_start.strip().lower() == "unknown":
                         playlist_name_at_start = None
-                    # Store track data
+
                     session["last_track_data"] = {
-                        "track": title, "artist": meta["artist"], "album": meta["album"],
+                        "track": title,
+                        "artist": meta["artist"],
+                        "album": meta["album"],
                         "playlist_name": playlist_name_at_start,
                         "art_url": current_track_data.get("art", ""),
                         "duration_sec": meta["duration_sec"],
@@ -538,10 +541,13 @@ def background_poller():
                     last_title = title
                     if network:
                         update_now_playing(network, meta["artist"], title, meta["album"])
+
+                # --- Update max position for current track ---
                 pos = meta["position"]
                 if pos > session["max_position"]:
                     session["max_position"] = pos
-            # Update UI display data
+
+            # --- Update UI display data (outside lock) ---
             current_track_data["track"] = title
             current_track_data["artist"] = meta["artist"]
             current_track_data["album"] = meta["album"]
@@ -556,14 +562,17 @@ def background_poller():
             secs = int(pos % 60)
             current_track_data["current"] = f"{mins}:{secs:02d}"
             current_track_data["progress"] = round(progress, 1)
-        fetch_http_details()
+
+        fetch_http_details()   # always refresh album art, quality, etc.
         with session["lock"]:
             if session["last_track_data"]:
+                # Update metadata for the currently tracked track (art, quality, etc.)
                 session["last_track_data"]["art_url"] = current_track_data.get("art", session["last_track_data"]["art_url"])
                 session["last_track_data"]["quality"] = current_track_data.get("quality", session["last_track_data"]["quality"])
                 session["last_track_data"]["bit_depth"] = current_track_data.get("bitDepth", session["last_track_data"]["bit_depth"])
                 session["last_track_data"]["sample_rate"] = current_track_data.get("sampleRate", session["last_track_data"]["sample_rate"])
                 session["last_track_data"]["codec"] = current_track_data.get("codec", session["last_track_data"]["codec"])
+
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
 
