@@ -1353,7 +1353,6 @@ def api_artists_without_genre():
     conn.close()
     return jsonify([row[0] for row in rows])
 
-# ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -1424,6 +1423,20 @@ HTML_TEMPLATE = """
             .tag-bar { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 12px; gap: 10px; }
             .tag-item { justify-content: space-between; }
         }
+        #genreModal {
+            display: flex;
+        }
+        #genreModal input {
+            background: var(--button-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-card);
+        }
+        #genreModal button {
+            transition: opacity 0.2s;
+        }
+        #genreModal button:hover {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
@@ -1467,6 +1480,21 @@ HTML_TEMPLATE = """
             </div>
         </div>
     </div>
+
+    <div id="genreModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: var(--bg-card); border-radius: 16px; padding: 1.5rem; width: 300px; max-width: 90%; box-shadow: 0 4px 12px rgba(0,0,0,0.5); color: var(--text-primary);">
+            <h3 id="modalTitle" style="margin-top: 0; color: var(--accent);">Tag Genre</h3>
+            <p id="modalItemName" style="margin-bottom: 1rem;"></p>
+            <label for="genreInput" style="display: block; margin-bottom: 4px;">Genre:</label>
+            <input list="genreList" id="genreInput" placeholder="Type or select a genre" style="width: 100%; padding: 8px; margin-bottom: 8px; border-radius: 8px; border: 1px solid var(--border-card); background: var(--button-bg); color: var(--text-primary);">
+            <datalist id="genreList"></datalist>
+            <div style="display: flex; gap: 10px; margin-top: 1rem;">
+                <button id="modalSaveBtn" style="flex:1; background: var(--accent); border: none; padding: 8px; border-radius: 8px; color: white; cursor: pointer;">Save</button>
+                <button id="modalCancelBtn" style="flex:1; background: #6c757d; border: none; padding: 8px; border-radius: 8px; color: white; cursor: pointer;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
 <script>
 const socket = io({ reconnection: true, reconnectionAttempts: Infinity, reconnectionDelay: 1000 });
 let trackDurationSec = 0;
@@ -1521,12 +1549,11 @@ function fetchCurrentGenre(artist, album, playlist) {
         .then(data => {
             const genreSpan = document.getElementById('currentGenre');
             if (data.genre && data.genre !== '') {
-                // If genre already starts with the emoji, don't add another
                 let displayGenre = data.genre;
                 if (!displayGenre.startsWith('🏷️')) {
                     displayGenre = `🏷️ ${displayGenre}`;
                 }
-genreSpan.innerText = displayGenre;
+                genreSpan.innerText = displayGenre;
                 genreSpan.style.display = 'inline-flex';
             } else {
                 genreSpan.style.display = 'none';
@@ -1558,7 +1585,6 @@ function updateUI(data) {
     trackDurationSec = data.duration_sec || trackDurationSec;
     updateTaggingInfo(data);
     
-    // Fetch genre for current track
     let playlistName = data.playing_from.replace(/^Playing from: /, '');
     fetchCurrentGenre(data.artist, data.album, playlistName);
 }
@@ -1574,51 +1600,93 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
     fetch(`/seek/${Math.floor(percent * trackDurationSec)}`, { method: 'PUT' });
 });
 
-// Tagging functions (unchanged)
-function tagArtist() {
+// ========== Genre Modal ==========
+const escapeHtml = (str) => {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
+};
+
+let currentTagType = null;   // 'artist' or 'album'
+let currentTagName = null;
+
+function showGenreModal(type, name) {
+    currentTagType = type;
+    currentTagName = name;
+    document.getElementById('modalTitle').innerText = type === 'artist' ? 'Tag Artist Genre' : 'Tag Album Genre';
+    document.getElementById('modalItemName').innerHTML = `<strong>${escapeHtml(name)}</strong>`;
+    document.getElementById('genreInput').value = '';
+    fetch('/api/genre_list')
+        .then(r => r.json())
+        .then(genres => {
+            const datalist = document.getElementById('genreList');
+            datalist.innerHTML = '';
+            genres.forEach(genre => {
+                const option = document.createElement('option');
+                option.value = genre;
+                datalist.appendChild(option);
+            });
+        })
+        .catch(e => console.error('Error loading genres:', e));
+    document.getElementById('genreModal').style.display = 'flex';
+}
+
+function closeModal() {
+    document.getElementById('genreModal').style.display = 'none';
+}
+
+function saveGenre() {
+    const genre = document.getElementById('genreInput').value.trim();
+    if (!genre) {
+        alert("Please enter or select a genre.");
+        return;
+    }
+    if (currentTagType === 'artist') {
+        fetch('/api/set_artist_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist: currentTagName, genre: genre })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else alert(`Genre "${genre}" saved for artist "${currentTagName}".`);
+            closeModal();
+        })
+        .catch(e => alert('Request failed: ' + e));
+    } else if (currentTagType === 'album') {
+        fetch('/api/set_album_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ album: currentTagName, artist: currentArtist, genre: genre })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) alert('Error: ' + data.error);
+            else alert(`Genre "${genre}" saved for album "${currentTagName}".`);
+            closeModal();
+        })
+        .catch(e => alert('Request failed: ' + e));
+    }
+}
+
+document.getElementById('tagArtistBtn').addEventListener('click', () => {
     if (!currentArtist) {
         alert("No artist playing.");
         return;
     }
-    const genre = prompt("Enter genre for artist:", "");
-    if (genre === null) return;
-    fetch('/api/set_artist_genre', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist: currentArtist, genre: genre })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) alert("Error: " + data.error);
-        else alert(`Genre "${genre}" saved for artist "${currentArtist}".`);
-    })
-    .catch(e => alert("Request failed: " + e));
-}
-
-function tagAlbum() {
+    showGenreModal('artist', currentArtist);
+});
+document.getElementById('tagAlbumBtn').addEventListener('click', () => {
     if (!currentAlbum || !currentArtist) {
         alert("No album playing.");
         return;
     }
-    const genre = prompt("Enter genre for album:", "");
-    if (genre === null) return;
-    fetch('/api/set_album_genre', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ album: currentAlbum, artist: currentArtist, genre: genre })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.error) alert("Error: " + data.error);
-        else alert(`Genre "${genre}" saved for album "${currentAlbum}".`);
-    })
-    .catch(e => alert("Request failed: " + e));
-}
+    showGenreModal('album', currentAlbum);
+});
+document.getElementById('modalSaveBtn').addEventListener('click', saveGenre);
+document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
 
-document.getElementById('tagArtistBtn').addEventListener('click', tagArtist);
-document.getElementById('tagAlbumBtn').addEventListener('click', tagAlbum);
-
-// RateYourMusic button for Now Playing page
+// ========== RateYourMusic button (once) ==========
 (function() {
     function addButton() {
         const card = document.querySelector('.card');
@@ -1659,50 +1727,6 @@ document.getElementById('tagAlbumBtn').addEventListener('click', tagAlbum);
     else addButton();
     setTimeout(addButton, 1000);
 })();
-
-// RateYourMusic button for Now Playing page
-(function() {
-    function addButton() {
-        const card = document.querySelector('.card');
-        if (!card || document.getElementById('rymButton')) return;
-        const btn = document.createElement('button');
-        btn.id = 'rymButton';
-        btn.innerHTML = '🎵 RYM';
-        btn.title = 'Search on RateYourMusic';
-        Object.assign(btn.style, {
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            border: 'none',
-            borderRadius: '20px',
-            padding: '4px 10px',
-            fontSize: '0.7rem',
-            cursor: 'pointer',
-            color: 'white',
-            fontFamily: 'inherit',
-            zIndex: '100',
-            transition: 'background 0.2s'
-        });
-        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
-        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
-        if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
-        card.appendChild(btn);
-        btn.addEventListener('click', () => {
-            const artist = document.getElementById('artist').innerText;
-            const album = document.getElementById('album').innerText;
-            if (!artist || artist === '-') { alert('No artist playing'); return; }
-            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
-            window.open(url, '_blank');
-        });
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
-    else addButton();
-    setTimeout(addButton, 1000);
-})();
-
-
 </script>
 </body>
 </html>
