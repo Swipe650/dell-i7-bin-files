@@ -191,18 +191,6 @@ def migrate_artist_genre_db():
     conn.commit()
     conn.close()
 
-def migrate_album_genre_db():
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS album_genre_map (
-        album TEXT,
-        artist TEXT,
-        genre TEXT NOT NULL,
-        PRIMARY KEY (album, artist)
-    )''')
-    conn.commit()
-    conn.close()
-
 def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
     timestamp = int(time.time())
     genre = None
@@ -681,7 +669,7 @@ def api_top_artists_by_time():
         WHERE duration_sec > 0
         GROUP BY artist
         ORDER BY total_seconds DESC
-        LIMIT 25
+        LIMIT 50
     """)
     rows = c.fetchall()
     conn.close()
@@ -705,7 +693,7 @@ def api_longest_listening_day():
 
 @app.route('/api/top_playlists')
 def api_top_playlists():
-    top = get_top_playlists(25)
+    top = get_top_playlists(50)
     return jsonify(top)
 
 @app.route('/api/top_genres')
@@ -718,7 +706,7 @@ def api_top_genres():
         WHERE genre IS NOT NULL AND genre != ''
         GROUP BY genre
         ORDER BY count DESC
-        LIMIT 25
+        LIMIT 50
     """)
     rows = c.fetchall()
     conn.close()
@@ -840,70 +828,6 @@ def api_genre_items():
         "tracks": tracks
     })
 
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
-
-    c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ? AND timestamp < ?", (start_ts, end_ts))
-    total_scrobbles = c.fetchone()[0]
-
-    c.execute("SELECT SUM(duration_sec) FROM scrobbles WHERE timestamp >= ? AND timestamp < ? AND duration_sec > 0", (start_ts, end_ts))
-    total_sec = c.fetchone()[0] or 0
-    total_hours = round(total_sec / 3600, 1)
-
-    c.execute("""
-        SELECT artist, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY artist
-        ORDER BY count DESC
-        LIMIT 25
-    """, (start_ts, end_ts))
-    top_artists = [{"artist": row[0], "count": row[1]} for row in c.fetchall()]
-
-    c.execute("""
-        SELECT artist, album, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ? AND album IS NOT NULL AND album != ''
-        GROUP BY artist, album
-        ORDER BY count DESC
-        LIMIT 25
-    """, (start_ts, end_ts))
-    top_albums = [{"artist": row[0], "album": row[1], "count": row[2]} for row in c.fetchall()]
-
-    c.execute("""
-        SELECT artist, track, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY artist, track
-        ORDER BY count DESC
-        LIMIT 25
-    """, (start_ts, end_ts))
-    top_tracks = [{"artist": row[0], "track": row[1], "count": row[2]} for row in c.fetchall()]
-
-    c.execute("""
-        SELECT strftime('%H', datetime(timestamp, 'unixepoch')) as hour, COUNT(*) as count
-        FROM scrobbles
-        WHERE timestamp >= ? AND timestamp < ?
-        GROUP BY hour
-        ORDER BY hour
-    """, (start_ts, end_ts))
-    rows = c.fetchall()
-    hour_counts = [0] * 24
-    for row in rows:
-        hour_counts[int(row[0])] = row[1]
-    conn.close()
-
-    return jsonify({
-        "year": year,
-        "month": month,
-        "total_scrobbles": total_scrobbles,
-        "total_hours": total_hours,
-        "top_artists": top_artists,
-        "top_albums": top_albums,
-        "top_tracks": top_tracks,
-        "hour_counts": hour_counts
-    })
-
 # ----- DELETE SCROBBLE ENDPOINT -----
 @app.route('/api/scrobble/<int:scrobble_id>', methods=['DELETE'])
 def delete_scrobble(scrobble_id):
@@ -991,7 +915,6 @@ def api_search_scrobbles():
         query += " AND album LIKE ?"
         params.append(f"%{album}%")
     if playlist:
-        # Change to partial match (LIKE)
         query += " AND playlist LIKE ?"
         params.append(f"%{playlist}%")
     if genre:
@@ -1153,7 +1076,7 @@ def api_set_playlist_genre():
         # Delete mapping
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
-        c.execute("UPDATE scrobbles SET genre = ? WHERE playlist = ?", (genre, playlist))
+        c.execute("DELETE FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
         conn.commit()
         conn.close()
         return jsonify({"status": "removed"})
@@ -1190,22 +1113,18 @@ def api_set_artist_genre():
     genre = data.get('genre')
     if not artist:
         return jsonify({"error": "Missing artist name"}), 400
-    
+
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    
+
     if not genre:
         # Delete mapping
         c.execute("DELETE FROM artist_genre_map WHERE artist = ?", (artist,))
-        # Optionally clear genre from existing scrobbles (or leave them as is)
-        # To keep consistency, you may set genre = NULL for this artist
         c.execute("UPDATE scrobbles SET genre = NULL WHERE artist = ?", (artist,))
     else:
-        # Insert or replace mapping
         c.execute("INSERT OR REPLACE INTO artist_genre_map (artist, genre) VALUES (?, ?)", (artist, genre))
-        # Immediately backfill all existing scrobbles of this artist
         c.execute("UPDATE scrobbles SET genre = ? WHERE artist = ?", (genre, artist))
-    
+
     conn.commit()
     conn.close()
     return jsonify({"status": "saved"})
@@ -1226,13 +1145,11 @@ def api_search_artists():
         return jsonify([])
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    # Get distinct artists
     c.execute("SELECT DISTINCT artist FROM scrobbles WHERE artist LIKE ? ORDER BY artist LIMIT 50", (f'%{query}%',))
     artists = [row[0] for row in c.fetchall()]
     if not artists:
         conn.close()
         return jsonify([])
-    # For each artist, find the most frequent genre from scrobbles
     placeholders = ','.join('?' * len(artists))
     query_sql = f"""
         WITH artist_genre_counts AS (
@@ -1353,6 +1270,7 @@ def api_artists_without_genre():
     conn.close()
     return jsonify([row[0] for row in rows])
 
+# ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -1786,7 +1704,6 @@ SCROBBLES_TEMPLATE = """
             --hover-row: #2a2a2a;
             --shadow: rgba(0,0,0,0.3);
             --art-bg: #2c2c2c;
-            --hover-row: #2a2a2a;
         }
         * { box-sizing: border-box; }
         body {
@@ -1831,7 +1748,6 @@ SCROBBLES_TEMPLATE = """
         .total-value { font-size: 1.2rem; font-weight: 600; color: var(--accent); }
         .time-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
         .time-value { font-size: 1.2rem; font-weight: 600; color: var(--accent); }
-        .total-scrobbles { text-align: center; font-size: 1.1rem; margin-top: 0.3rem; color: var(--accent); font-weight: 600; }
         .tools { background: var(--bg-tools); border-radius: 12px; padding: 1rem; margin-bottom: 2rem; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; box-shadow: 0 1px 3px var(--shadow); border: 1px solid var(--border-card); }
         .tools button, .tools label { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; font-size: 0.8rem; cursor: pointer; font-family: inherit; transition: all 0.2s; color: var(--text-primary); }
         .tools button:hover, .tools label:hover { background: var(--button-hover); border-color: var(--text-muted); }
@@ -1844,7 +1760,6 @@ SCROBBLES_TEMPLATE = """
         body.dark .scrobble-item:hover {
             background: #2a2a2a !important;
         }
-        .scrobble-item:hover { background: var(--hover-row, #fef9f9); }
         .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--art-bg); box-shadow: 0 1px 2px var(--shadow); }
         .track-info { flex: 1; min-width: 0; }
         .track-name { font-weight: 600; font-size: 1rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2282,48 +2197,6 @@ SCROBBLES_TEMPLATE = """
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
     
-// RateYourMusic button for Scrobble Overview page
-(function() {
-    function addButton() {
-        const container = document.querySelector('.now-playing');
-        if (!container || document.getElementById('rymButtonOverview')) return;
-        const btn = document.createElement('button');
-        btn.id = 'rymButtonOverview';
-        btn.innerHTML = '🎵 RYM';
-        btn.title = 'Search on RateYourMusic';
-        Object.assign(btn.style, {
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            border: 'none',
-            borderRadius: '20px',
-            padding: '4px 10px',
-            fontSize: '0.7rem',
-            cursor: 'pointer',
-            color: 'white',
-            fontFamily: 'inherit',
-            zIndex: '100',
-            transition: 'background 0.2s'
-        });
-        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
-        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
-        if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
-        container.appendChild(btn);
-        btn.addEventListener('click', () => {
-            const artist = document.getElementById('nowArtist').innerText;
-            const album = document.getElementById('nowAlbum').innerText;
-            if (!artist || artist === '-') { alert('No artist playing'); return; }
-            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
-            window.open(url, '_blank');
-        });
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
-    else addButton();
-    setTimeout(addButton, 1000);
-})();
-
 // RateYourMusic button for Scrobble Overview page
 (function() {
     function addButton() {
