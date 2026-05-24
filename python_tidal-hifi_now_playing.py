@@ -105,6 +105,16 @@ def cleanup_old_backups():
         except OSError as e:
             print(f"⚠️ Could not delete old backup {oldest}: {e}")
 
+def vacuum_database():
+    """Rebuild the database file to reclaim space and optimise performance."""
+    try:
+        conn = sqlite3.connect(DATABASE)
+        conn.execute("VACUUM")
+        conn.close()
+        print("🧹 Database vacuumed successfully.")
+    except Exception as e:
+        print(f"⚠️ Vacuum failed: {e}")
+
 def get_most_recent_backup():
     """Return the path of the most recent backup file, or None if none exist."""
     backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "scrobbles_*.db")))
@@ -112,6 +122,8 @@ def get_most_recent_backup():
 
 def backup_scheduler():
     """On startup, backs up only if the last backup is older than 24h, then schedules the next."""
+    backup_count = 0  # initialise counter
+
     # --- Determine when the last backup was made ---
     most_recent = get_most_recent_backup()
     if most_recent:
@@ -131,6 +143,10 @@ def backup_scheduler():
         print("💾 Performing initial backup on startup...")
         backup_database()
         cleanup_old_backups()
+        backup_count += 1
+        if backup_count % 7 == 0:
+            vacuum_database()
+
         # Re‑fetch the most recent backup after creation
         most_recent = get_most_recent_backup()
         if most_recent:
@@ -156,6 +172,10 @@ def backup_scheduler():
             print("⏰ Backup time already due, performing backup now.")
             backup_database()
             cleanup_old_backups()
+            backup_count += 1
+            if backup_count % 7 == 0:
+                vacuum_database()
+
             most_recent = get_most_recent_backup()
             if most_recent:
                 basename = os.path.basename(most_recent)
@@ -175,6 +195,10 @@ def backup_scheduler():
         print("⏰ Performing scheduled backup...")
         backup_database()
         cleanup_old_backups()
+        backup_count += 1
+        if backup_count % 7 == 0:
+            vacuum_database()
+
         most_recent = get_most_recent_backup()
         if most_recent:
             basename = os.path.basename(most_recent)
@@ -223,46 +247,6 @@ def _save_mb_cache(artist_lower, mbid, genres):
               (artist_lower, mbid, genres_str, int(time.time())))
     conn.commit()
     conn.close()
-
-# def _search_artist_mbid(artist_name):
-#     """Search MusicBrainz for an artist and return the first MBID, or None."""
-#     _rate_limit()
-#     params = {
-#         "query": f'artist:"{artist_name}"',
-#         "fmt": "json",
-#         "limit": 1
-#     }
-#     headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
-#     try:
-#         resp = requests.get(f"{MUSICBRAINZ_API_BASE}/artist/", params=params, headers=headers, timeout=10)
-#         if resp.status_code != 200:
-#             return None
-#         data = resp.json()
-#         artists = data.get("artists", [])
-#         if not artists:
-#             return None
-#         return artists[0]["id"]
-#     except Exception as e:
-#         print(f"MusicBrainz artist search error: {e}")
-#         return None
-# 
-# def _fetch_artist_tags(mbid):
-#     """Fetch genre tags for a MusicBrainz artist ID. Returns a list of tag names."""
-#     _rate_limit()
-#     params = {"inc": "tags", "fmt": "json"}
-#     headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
-#     try:
-#         resp = requests.get(f"{MUSICBRAINZ_API_BASE}/artist/{mbid}", params=params, headers=headers, timeout=10)
-#         if resp.status_code != 200:
-#             return []
-#         data = resp.json()
-#         tags = data.get("tags", [])
-#         # Sort by tag count (popularity) descending, take names
-#         sorted_tags = sorted(tags, key=lambda t: t.get("count", 0), reverse=True)
-#         return [t["name"] for t in sorted_tags]
-#     except Exception as e:
-#         print(f"MusicBrainz tag fetch error: {e}")
-#         return []
 
 def _mb_request(url, params, max_retries=3):
     """Wrapper for MusicBrainz API calls with retry on transient errors."""
@@ -435,6 +419,19 @@ def init_db():
     migrate_artist_genre_db()
     migrate_album_genre_db()
     migrate_musicbrainz_cache_db()
+    migrate_indexes()
+
+def migrate_indexes():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    # Speeds up stats, search, and the poller's genre lookups
+    c.execute("CREATE INDEX IF NOT EXISTS idx_scrobbles_artist ON scrobbles(artist)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_scrobbles_timestamp ON scrobbles(timestamp)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_scrobbles_genre ON scrobbles(genre)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_artist_lower ON artist_musicbrainz_cache(artist_lower)")
+    conn.commit()
+    conn.close()
+    print("📊 Database indexes verified/created.")
 
 def migrate_musicbrainz_cache_db():
     conn = sqlite3.connect(DATABASE)
@@ -891,6 +888,7 @@ def backup_now():
         return send_file(path, as_attachment=True, download_name=os.path.basename(path))
     else:
         return "Backup failed", 500
+
 
 @app.route('/favicon.ico')
 def favicon():
@@ -1618,32 +1616,34 @@ def api_artists_without_genre():
 
 @app.route('/api/backfill_musicbrainz_genres', methods=['POST'])
 def api_backfill_musicbrainz_genres():
-    # Fetch all untagged scrobble IDs and artists into memory
+    # Fetch all untagged scrobble artists (distinct, to minimise API calls)
     conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT id, artist FROM scrobbles WHERE genre IS NULL OR genre=''")
-    rows = c.fetchall()
-    conn.close()   # release the lock immediately
+    c.execute("SELECT DISTINCT artist FROM scrobbles WHERE genre IS NULL OR genre=''")
+    artists = [row[0] for row in c.fetchall()]
+    conn.close()
 
-    updated = 0
-    for row in rows:
-        artist = row["artist"]
+    total_updated = 0
+    for artist in artists:
         if not artist:
             continue
-        genres = get_musicbrainz_genres(artist)  # safe: no other connection held
-        if genres:
-            genre = genres[0]
-            # Open a fresh connection for the single UPDATE
-            conn2 = sqlite3.connect(DATABASE)
-            c2 = conn2.cursor()
-            c2.execute("UPDATE scrobbles SET genre=? WHERE id=?", (genre, row["id"]))
-            conn2.commit()
-            conn2.close()
-            updated += 1
+        genres = get_musicbrainz_genres(artist)
+        if not genres:
+            continue
+        top_genre = genres[0]
 
-    print(f"🎵 MusicBrainz backfill: {updated} scrobbles updated.")
-    return jsonify({"status": "ok", "updated": updated})
+        # Batch update all scrobbles for this artist that still have no genre
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("UPDATE scrobbles SET genre=? WHERE artist=? AND (genre IS NULL OR genre='')",
+                  (top_genre, artist))
+        updated = c.rowcount
+        conn.commit()
+        conn.close()
+        total_updated += updated
+
+    print(f"🎵 MusicBrainz backfill: {total_updated} scrobbles updated.")
+    return jsonify({"status": "ok", "updated": total_updated})
 
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
