@@ -1934,10 +1934,14 @@ SCROBBLES_TEMPLATE = """
 <div class="container">
     <div class="header">
         <div>
-            <h1>📊 Reports and Tools</h1>
-            <div class="sub">playlist rename, genre tagging & monthly reports</div>
+            <h1>📀 Scrobble Overview</h1>
+            <div class="sub">your listening history, top charts & now playing</div>
         </div>
-        <a href="/scrobbles" class="back-link">◀ Back to Overview</a>
+        <div style="display: flex; gap: 10px;">
+            <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()">🌓 Dark/Light</button>
+            <a href="/" class="player-link" target="_blank">◀ Now Playing (full)</a>
+            <a href="/monthly" class="report-link" target="_blank">📊 Reports & Tools</a>
+        </div>
     </div>
     <div class="now-playing" id="nowPlaying">
         <img id="nowArt" class="now-art" src="" alt="album art">
