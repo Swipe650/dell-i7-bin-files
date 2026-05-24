@@ -1727,7 +1727,8 @@ HTML_TEMPLATE = """
         .info { display:flex; flex-direction:column; justify-content:center; min-width: 400px; flex: 1; }
         .track { font-size:2em; word-break:break-word; }
         .artist { color:#ccc; }
-        .album { color:#999; margin-bottom:20px; }
+        .album { color:#999; margin-bottom:4px; }
+        .last-scrobbled { font-size:0.85em; color:#aaa; margin-bottom:16px; }
         .playing-from { font-size:0.9em; margin-top:5px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
         .progress-container { width:100%; height:6px; background:rgba(255,255,255,0.2); border-radius:10px; overflow:hidden; cursor:default; }
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
@@ -1736,17 +1737,18 @@ HTML_TEMPLATE = """
         .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; transition: background-color 0.2s ease; }
         .btn:hover { background:rgba(255,255,255,0.25); }
         .tag-bar {
-            background: rgba(0,0,0,0.3);
-            backdrop-filter: blur(10px);
-            border-radius: 40px;
-            padding: 8px 20px;
+            background: rgba(0,0,0,0.01);
+            backdrop-filter: blur(0px);
+            border-radius: 12px;
+            padding: 6px 12px;
             display: flex;
             flex-wrap: wrap;
             align-items: center;
             justify-content: center;
             gap: 20px;
             font-size: 0.8rem;
-            margin-top: 5px;
+            margin-top: 24px;
+            margin-bottom: 0;
         }
         .tag-bar strong { font-weight: 600; margin-right: 4px; }
         .tag-bar .btn-sm {
@@ -1762,13 +1764,11 @@ HTML_TEMPLATE = """
         .tag-bar .btn-sm:hover { background: rgba(255,255,255,0.3); }
         .tag-item { display: inline-flex; align-items: center; gap: 8px; }
         .meta { margin-top:10px; font-size:0.85em; color:#bbb; display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 4px; }
-        #bitrate { margin-left: auto; }
         .quality-badge, .genre-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; background: rgba(255,255,255,0.1); }
-        .bitrate { font-size:0.95em; font-family: monospace; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; }
+        .bitrate { font-size:0.95em; font-family: monospace; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; margin-left: auto; }
         .bitrate-max { color: #FFB347; background-color: rgba(255, 179, 71, 0.20); }
         .bitrate-high { color: #40E0D0; background-color: rgba(64, 224, 208, 0.20); }
         .bitrate-low { color: #888888; background-color: rgba(136, 136, 136, 0.20); }
-        #bitrate { margin-left: auto; }
         .clickable { cursor: pointer; padding: 2px 6px; border-radius: 8px; transition: background-color 0.2s ease; display: inline-block; }
         .clickable:hover { background-color: rgba(255,255,255,0.2); }
         @media (max-width: 768px) {
@@ -1780,7 +1780,7 @@ HTML_TEMPLATE = """
             .info { min-width: 280px; }
             .meta { flex-direction: column; gap: 5px; text-align: center; }
             .controls { justify-content: center; }
-            .tag-bar { flex-direction: column; align-items: stretch; border-radius: 20px; padding: 12px; gap: 10px; }
+            .tag-bar { flex-direction: column; align-items: stretch; border-radius: 12px; padding: 8px; gap: 10px; }
             .tag-item { justify-content: space-between; }
         }
         #genreModal {
@@ -1808,7 +1808,7 @@ HTML_TEMPLATE = """
                 <div id="track" class="track"></div>
                 <div id="artist" class="artist"></div>
                 <div id="album" class="album"></div>
-                <div id="lastScrobbled" style="font-size:0.85em; color:#aaa; margin-top:2px;"></div>
+                <div id="lastScrobbled" class="last-scrobbled"></div>
                 <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
                     <div id="progress" class="progress"></div>
@@ -1820,7 +1820,7 @@ HTML_TEMPLATE = """
                     <button class="btn" onclick="control('next')">⏭ Next</button>
                 </div>
                 <div class="meta">
-                    <span id="scrobbleCounter" font-size:0.9em; color:#ccc; font-weight:500;">📀 <span id="totalScrobblesDisplay">...</span></span>
+                    <span id="scrobbleCounter" style="margin-right:8px; font-size:0.9em; color:#ccc; font-weight:500;">📀 <span id="totalScrobblesDisplay">...</span></span>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="currentGenre" class="genre-badge" style="display: none;"></span>
@@ -1829,18 +1829,18 @@ HTML_TEMPLATE = """
                     </div>
                     <span id="bitrate" class="bitrate"></span>
                 </div>
+
+                <!-- Genre tagging moved inside the card -->
+                <div class="tag-bar">
+                    <div class="tag-item">
+                        <strong>Artist:</strong> <span id="currentArtistForTag">-</span>
+                        <button id="tagArtistBtn" class="btn-sm">🏷️ Tag Genre</button>
+                    </div>
+                    <div class="tag-item">
+                        <strong>Album:</strong> <span id="currentAlbumForTag">-</span>
+                        <button id="tagAlbumBtn" class="btn-sm">🏷️ Tag Genre</button>
+                    </div>
                 </div>
-            </div>
-        </div>
-        <!-- Compact tag bar -->
-        <div class="tag-bar">
-            <div class="tag-item">
-                <strong>Artist:</strong> <span id="currentArtistForTag">-</span>
-                <button id="tagArtistBtn" class="btn-sm">🏷️ Tag Genre</button>
-            </div>
-            <div class="tag-item">
-                <strong>Album:</strong> <span id="currentAlbumForTag">-</span>
-                <button id="tagAlbumBtn" class="btn-sm">🏷️ Tag Genre</button>
             </div>
         </div>
     </div>
@@ -1940,7 +1940,20 @@ function fetchTotalScrobbles() {
         .catch(() => {});
 }
 
-// Retag button event listener (will be attached after DOM is ready)
+function formatRelativeTimeShort(ts) {
+    const diff = Math.floor((Date.now() / 1000) - ts);
+    if (diff < 60) return 'just now';
+    const mins = Math.floor(diff / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 4) return `${weeks}w ago`;
+    return new Date(ts * 1000).toLocaleDateString();
+}
+
 function setupRetagButton() {
     const btn = document.getElementById('mbRetagBtn');
     if (btn) {
@@ -1967,20 +1980,6 @@ function setupRetagButton() {
     }
 }
 
-function formatRelativeTimeShort(ts) {
-    const diff = Math.floor((Date.now() / 1000) - ts);
-    if (diff < 60) return 'just now';
-    const mins = Math.floor(diff / 60);
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 7) return `${days}d ago`;
-    const weeks = Math.floor(days / 7);
-    if (weeks < 4) return `${weeks}w ago`;
-    return new Date(ts * 1000).toLocaleDateString();
-}
-
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
@@ -1990,11 +1989,11 @@ function updateUI(data) {
     document.getElementById('duration').innerText = data.duration;
     document.getElementById('progress').style.width = data.progress + '%';
     document.getElementById('metaText').innerHTML = `💿 Volume: ${data.volume}% | 🔀 <span class="clickable" onclick="toggleShuffle()">Shuffle: ${data.shuffle}</span> | 🔁 <span class="clickable" onclick="toggleRepeat()">Repeat: ${data.repeat}</span>`;
-    
+
     const badge = document.getElementById('qualityBadge');
     if (data.quality_raw) { badge.innerText = getQualityDisplay(data.quality_raw); badge.style.display = 'inline-flex'; }
     else { badge.style.display = 'none'; }
-    
+
     const bitrateText = getBitrateText(data.quality, data.bitDepth, data.sampleRate, data.badgeText);
     document.getElementById('bitrate').innerText = bitrateText;
     updateBitrateColor(data.quality, bitrateText);
@@ -2003,10 +2002,11 @@ function updateUI(data) {
     document.getElementById('favicon').href = data.art;
     trackDurationSec = data.duration_sec || trackDurationSec;
     updateTaggingInfo(data);
-    
+
     let playlistName = data.playing_from.replace(/^Playing from: /, '');
     fetchCurrentGenre(data.artist, data.album, playlistName);
-    // Fetch last scrobbled time
+
+    // Last scrobbled
     fetch(`/api/last_scrobbled?artist=${encodeURIComponent(data.artist)}&track=${encodeURIComponent(data.track)}`)
         .then(r => r.json())
         .then(res => {
@@ -2017,7 +2017,7 @@ function updateUI(data) {
                 el.innerText = '';
             }
         })
-        .catch(() => {});    
+        .catch(() => {});
 }
 
 socket.on('update', (data) => updateUI(data));
@@ -2031,13 +2031,21 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
     fetch(`/seek/${Math.floor(percent * trackDurationSec)}`, { method: 'PUT' });
 });
 
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { e.preventDefault(); control('playpause'); }
+    else if (e.code === 'ArrowLeft') { control('previous'); }
+    else if (e.code === 'ArrowRight') { control('next'); }
+});
+
 // ========== Genre Modal ==========
 const escapeHtml = (str) => {
     if (!str) return '';
     return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
 };
 
-let currentTagType = null;   // 'artist' or 'album'
+let currentTagType = null;
 let currentTagName = null;
 
 function showGenreModal(type, name) {
@@ -2159,7 +2167,6 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
     setTimeout(addButton, 1000);
 })();
 
-// Init scrobble counter and retag button setup
 fetchTotalScrobbles();
 setInterval(fetchTotalScrobbles, 60000);
 setupRetagButton();
