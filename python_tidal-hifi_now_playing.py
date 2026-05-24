@@ -1033,7 +1033,7 @@ def api_top_genres():
         WHERE genre IS NOT NULL AND genre != ''
         GROUP BY genre
         ORDER BY count DESC
-        LIMIT 50
+        LIMIT 100
     """)
     rows = c.fetchall()
     conn.close()
