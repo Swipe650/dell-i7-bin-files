@@ -71,7 +71,7 @@ MUSICBRAINZ_TAG_BLACKLIST = {
     "live", "concert", "concerts", "my collection", "library",
     "albums i own", "owned", "love", "awesome", "seen live",
     "best of", "top 10", "check out", "australian", "canadian", 
-    "_edit"
+    "_edit", "production music"
 }
 
 # ------------------------- BACKUP SYSTEM -------------------------
@@ -1747,12 +1747,14 @@ HTML_TEMPLATE = """
         }
         .tag-bar .btn-sm:hover { background: rgba(255,255,255,0.3); }
         .tag-item { display: inline-flex; align-items: center; gap: 8px; }
-        .meta { margin-top:10px; font-size:0.85em; color:#bbb; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        .meta { margin-top:10px; font-size:0.85em; color:#bbb; display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 4px; }
+        #bitrate { margin-left: auto; }
         .quality-badge, .genre-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; background: rgba(255,255,255,0.1); }
         .bitrate { font-size:0.95em; font-family: monospace; padding: 4px 10px; border-radius: 12px; backdrop-filter: blur(8px); display: inline-block; }
         .bitrate-max { color: #FFB347; background-color: rgba(255, 179, 71, 0.20); }
         .bitrate-high { color: #40E0D0; background-color: rgba(64, 224, 208, 0.20); }
         .bitrate-low { color: #888888; background-color: rgba(136, 136, 136, 0.20); }
+        #bitrate { margin-left: auto; }
         .clickable { cursor: pointer; padding: 2px 6px; border-radius: 8px; transition: background-color 0.2s ease; display: inline-block; }
         .clickable:hover { background-color: rgba(255,255,255,0.2); }
         @media (max-width: 768px) {
@@ -1803,7 +1805,7 @@ HTML_TEMPLATE = """
                     <button class="btn" onclick="control('next')">⏭ Next</button>
                 </div>
                 <div class="meta">
-                    <span id="scrobbleCounter" style="margin-right:12px; font-size:0.8em; color:#ccc;">📀 <span id="totalScrobblesDisplay">...</span></span>
+                    <span id="scrobbleCounter" font-size:0.9em; color:#ccc; font-weight:500;">📀 <span id="totalScrobblesDisplay">...</span></span>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="currentGenre" class="genre-badge" style="display: none;"></span>
@@ -1811,6 +1813,7 @@ HTML_TEMPLATE = """
                         <span id="qualityBadge" class="quality-badge"></span>
                     </div>
                     <span id="bitrate" class="bitrate"></span>
+                </div>
                 </div>
             </div>
         </div>
