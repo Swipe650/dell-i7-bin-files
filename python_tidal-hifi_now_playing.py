@@ -1934,16 +1934,11 @@ SCROBBLES_TEMPLATE = """
 <div class="container">
     <div class="header">
         <div>
-            <h1>📀 Scrobble Overview</h1>
-            <div class="sub">your listening history, top charts & now playing</div>
+            <h1>📊 Reports and Tools</h1>
+            <div class="sub">playlist rename, genre tagging & monthly reports</div>
         </div>
-        <div style="display: flex; gap: 10px;">
-            <button class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()">🌓 Dark/Light</button>
-            <a href="/" class="player-link" target="_blank">◀ Now Playing (full)</a>
-            <a href="/monthly" class="report-link" target="_blank">📊 Reports & Tools</a>
-        </div>
+        <a href="/scrobbles" class="back-link">◀ Back to Overview</a>
     </div>
-
     <div class="now-playing" id="nowPlaying">
         <img id="nowArt" class="now-art" src="" alt="album art">
         <div class="now-info">
@@ -2326,14 +2321,14 @@ SCROBBLES_TEMPLATE = """
     fetchGenreDistribution();  // initial load
     loadScrobbles(0);
     setInterval(fetchNowPlaying, 5000);
-    
-// RateYourMusic button + Backup button for Scrobble Overview page
+
+// RateYourMusic button for Scrobble Overview page
 (function() {
     function addButtons() {
         const container = document.querySelector('.now-playing');
         if (!container) return;
 
-        // --- RYM Button (existing) ---
+        // --- RYM Button (top‑right) ---
         if (!document.getElementById('rymButtonOverview')) {
             const rymBtn = document.createElement('button');
             rymBtn.id = 'rymButtonOverview';
@@ -2367,45 +2362,13 @@ SCROBBLES_TEMPLATE = """
                 window.open(url, '_blank');
             });
         }
-
-        // --- Backup Button (new) ---
-        if (!document.getElementById('backupButtonOverview')) {
-            const backupBtn = document.createElement('button');
-            backupBtn.id = 'backupButtonOverview';
-            backupBtn.innerHTML = '💾 Backup';
-            backupBtn.title = 'Download database backup';
-            Object.assign(backupBtn.style, {
-                position: 'absolute',
-                top: '45px',               // right below the RYM button
-                right: '10px',
-                background: 'rgba(0,0,0,0.5)',
-                backdropFilter: 'blur(4px)',
-                border: 'none',
-                borderRadius: '20px',
-                padding: '4px 10px',
-                fontSize: '0.7rem',
-                cursor: 'pointer',
-                color: 'white',
-                fontFamily: 'inherit',
-                zIndex: '100',
-                transition: 'background 0.2s'
-            });
-            backupBtn.addEventListener('mouseenter', () => backupBtn.style.background = 'rgba(0,0,0,0.7)');
-            backupBtn.addEventListener('mouseleave', () => backupBtn.style.background = 'rgba(0,0,0,0.5)');
-            // Make sure container is still relative (already done for RYM, but safe)
-            if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
-            container.appendChild(backupBtn);
-            backupBtn.addEventListener('click', () => {
-                window.open('/backup/now', '_blank');
-            });
-        }
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButtons);
     else addButtons();
     setTimeout(addButtons, 1000);
 })();
-
+    
 </script>
 </body>
 </html>
@@ -2598,21 +2561,22 @@ MONTHLY_TEMPLATE = """
 </head>
 <body>
 <div class="container">
-    <div class="header">
-        <div>
-            <h1>📊 Reports and Tools</h1>
-            <div class="sub">playlist rename, genre tagging & monthly reports</div>
-        </div>
+<div class="header">
+    <div>
+        <h1>📊 Reports and Tools</h1>
+        <div class="sub">playlist rename, genre tagging & monthly reports</div>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
         <a href="/scrobbles" class="back-link">◀ Back to Overview</a>
     </div>
+</div>
 
-    <div class="controls">
-        <div class="month-picker-row">
-            <select id="yearSelect"></select>
-            <select id="monthSelect"></select>
-            <button id="loadReportBtn">Generate Report</button>
-        </div>
-    </div>
+    <div class="month-picker-row">
+        <select id="yearSelect"></select>
+        <select id="monthSelect"></select>
+        <button id="loadReportBtn">Generate Report</button>
+        <a href="/backup/now" class="back-link" download style="margin-left: auto;">💾 Backup Database</a>
+    </div>    
 
     <div id="reportContent" style="display: none;">
         <div class="stats-trend-row">
