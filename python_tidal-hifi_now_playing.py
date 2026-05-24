@@ -1194,24 +1194,43 @@ def api_current_genre():
     album = request.args.get('album', '')
     playlist = request.args.get('playlist', '')
     genre = None
-    conn = sqlite3.connect(DATABASE)
-    c = conn.cursor()
+
+    # 1. Artist mapping
     if artist:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
         c.execute("SELECT genre FROM artist_genre_map WHERE artist = ?", (artist,))
         row = c.fetchone()
         if row:
             genre = row[0]
+        conn.close()
+
+    # 2. Album mapping
     if not genre and album and artist:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
         c.execute("SELECT genre FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
         row = c.fetchone()
         if row:
             genre = row[0]
+        conn.close()
+
+    # 3. MusicBrainz (new – live fallback)
+    if not genre and artist:
+        mb_genres = get_musicbrainz_genres(artist)
+        if mb_genres:
+            genre = mb_genres[0]
+
+    # 4. Playlist mapping (lowest priority)
     if not genre and playlist:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
         c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
         row = c.fetchone()
         if row:
             genre = row[0]
-    conn.close()
+        conn.close()
+
     return jsonify({"genre": genre})
 
 @app.route('/api/search_scrobbles')
