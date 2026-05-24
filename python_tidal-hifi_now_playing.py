@@ -2369,7 +2369,7 @@ SCROBBLES_TEMPLATE = """
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
         .stat-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; box-shadow: 0 1px 4px var(--shadow); border: 1px solid var(--border-card); }
         .stat-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; font-weight: 500; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
-        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; padding-right: 5px; }
+        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto;  overflow: hidden; padding-right: 5px; }
         .stat-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
         .stat-list img { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; background: var(--art-bg); flex-shrink: 0; }
         .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2908,6 +2908,29 @@ SCROBBLES_TEMPLATE = """
     else addButtons();
     setTimeout(addButtons, 1000);
 })();
+
+// Make scrollable lists require a click before scrolling
+document.querySelectorAll('.stat-list, .scrobble-list').forEach(list => {
+    list.addEventListener('click', function(e) {
+        // Toggle scrollability
+        if (list.style.overflowY === 'auto' || list.style.overflowY === 'scroll') {
+            list.style.overflowY = 'hidden';   // disable scrolling again
+        } else {
+            list.style.overflowY = 'auto';     // enable scrolling
+        }
+        // Optionally, stop propagation so the click doesn't trigger on child items
+        e.stopPropagation();
+    });
+});
+
+// Optional: clicking outside the list re‑locks scrolling
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.stat-list, .scrobble-list').forEach(list => {
+        if (!list.contains(e.target)) {
+            list.style.overflowY = 'hidden';
+        }
+    });
+});
     
 </script>
 </body>
