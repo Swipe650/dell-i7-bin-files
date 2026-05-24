@@ -65,6 +65,15 @@ session = {
 # Playlists to ignore (do not store playlist name, treat as album)
 IGNORED_PLAYLISTS = {"Top Tracks", "Mix", "My Daily Discovery"}  # add any others you want to ignore
 
+# MusicBrainz tags to ignore (case‑insensitive)
+MUSICBRAINZ_TAG_BLACKLIST = {
+    "seen live", "favourites", "uk", "favorite", "favorites",
+    "live", "concert", "concerts", "my collection", "library",
+    "albums i own", "owned", "love", "awesome", "seen live",
+    "best of", "top 10", "check out", "australian", "canadian", 
+    "_edit"
+}
+
 # ------------------------- BACKUP SYSTEM -------------------------
 import glob
 import shutil
@@ -338,8 +347,12 @@ def get_musicbrainz_genres(artist_name):
         print("   No genres found.")
 
     _save_mb_cache(artist_lower, mbid, genres)
+    
+    # Filter out blacklisted tags (case‑insensitive)
+    genres = [g for g in genres if g.lower() not in MUSICBRAINZ_TAG_BLACKLIST]
+    
     return genres
-
+    
 # ------------------------- LAST.FM INTEGRATION -------------------------
 def get_lastfm_credentials():
     try:
@@ -1659,6 +1672,30 @@ def api_backfill_musicbrainz_genres():
     print(f"🎵 MusicBrainz backfill: {total_updated} scrobbles updated.")
     return jsonify({"status": "ok", "updated": total_updated})
 
+@app.route('/api/mb_retag_artist/<artist_name>')
+def api_mb_retag_artist(artist_name):
+    # Delete the cache entry so we fetch fresh data
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("DELETE FROM artist_musicbrainz_cache WHERE artist_lower = ?", (artist_name.lower(),))
+    conn.commit()
+    conn.close()
+
+    genres = get_musicbrainz_genres(artist_name)
+    if not genres:
+        return jsonify({"status": "no genres found"}), 404
+
+    top_genre = genres[0]
+    # Update all scrobbles of this artist
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("UPDATE scrobbles SET genre = ? WHERE artist = ?", (top_genre, artist_name))
+    updated = c.rowcount
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "ok", "updated": updated, "genre": top_genre})
+
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -1766,9 +1803,11 @@ HTML_TEMPLATE = """
                     <button class="btn" onclick="control('next')">⏭ Next</button>
                 </div>
                 <div class="meta">
+                    <span id="scrobbleCounter" style="margin-right:12px; font-size:0.8em; color:#ccc;">📀 <span id="totalScrobblesDisplay">...</span></span>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="currentGenre" class="genre-badge" style="display: none;"></span>
+                        <button id="mbRetagBtn" class="btn-sm" style="display:none; background:rgba(255,255,255,0.08); border:none; color:#ccc; padding:2px 6px; border-radius:8px; cursor:pointer; font-size:0.8em;" title="Re‑fetch MusicBrainz genre">🔄</button>
                         <span id="qualityBadge" class="quality-badge"></span>
                     </div>
                     <span id="bitrate" class="bitrate"></span>
@@ -1808,6 +1847,7 @@ let trackDurationSec = 0;
 const artCache = new Map();
 let currentArtist = "";
 let currentAlbum = "";
+let currentPlaylist = "";
 
 function updateArt(url) {
     if (!url) return;
@@ -1845,6 +1885,7 @@ function toggleRepeat() { fetch('/toggle_repeat', { method: 'POST' }); }
 function updateTaggingInfo(data) {
     currentArtist = data.artist;
     currentAlbum = data.album;
+    currentPlaylist = data.playing_from.replace(/^Playing from: /, '');
     document.getElementById('currentArtistForTag').innerText = currentArtist || "-";
     document.getElementById('currentAlbumForTag').innerText = currentAlbum || "-";
 }
@@ -1855,6 +1896,7 @@ function fetchCurrentGenre(artist, album, playlist) {
         .then(r => r.json())
         .then(data => {
             const genreSpan = document.getElementById('currentGenre');
+            const retagBtn = document.getElementById('mbRetagBtn');
             if (data.genre && data.genre !== '') {
                 let displayGenre = data.genre;
                 if (!displayGenre.startsWith('🏷️')) {
@@ -1862,11 +1904,49 @@ function fetchCurrentGenre(artist, album, playlist) {
                 }
                 genreSpan.innerText = displayGenre;
                 genreSpan.style.display = 'inline-flex';
+                retagBtn.style.display = 'inline-block';
             } else {
                 genreSpan.style.display = 'none';
+                retagBtn.style.display = 'none';
             }
         })
         .catch(e => console.error("Genre fetch error:", e));
+}
+
+function fetchTotalScrobbles() {
+    fetch('/api/stats')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('totalScrobblesDisplay').innerText = data.total_scrobbles;
+        })
+        .catch(() => {});
+}
+
+// Retag button event listener (will be attached after DOM is ready)
+function setupRetagButton() {
+    const btn = document.getElementById('mbRetagBtn');
+    if (btn) {
+        btn.addEventListener('click', () => {
+            if (!currentArtist) { alert('No artist playing'); return; }
+            btn.disabled = true;
+            btn.innerText = '⏳';
+            fetch(`/api/mb_retag_artist/${encodeURIComponent(currentArtist)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        alert(`Genre re‑tagged to "${data.genre}" for ${data.updated} scrobbles.`);
+                    } else {
+                        alert('MusicBrainz returned no genres for this artist.');
+                    }
+                    fetchCurrentGenre(currentArtist, currentAlbum, currentPlaylist);
+                })
+                .catch(e => alert('Retag failed: ' + e))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerText = '🔄';
+                });
+        });
+    }
 }
 
 function updateUI(data) {
@@ -2034,6 +2114,11 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
     else addButton();
     setTimeout(addButton, 1000);
 })();
+
+// Init scrobble counter and retag button setup
+fetchTotalScrobbles();
+setInterval(fetchTotalScrobbles, 60000);
+setupRetagButton();
 </script>
 </body>
 </html>
