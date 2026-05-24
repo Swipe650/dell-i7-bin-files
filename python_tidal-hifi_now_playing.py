@@ -186,6 +186,176 @@ def backup_scheduler():
         else:
             last_backup_time = datetime.now()
 
+# ------------------------- MUSICBRAINZ INTEGRATION -------------------------
+import time
+import re
+
+MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (kerr_avon@live.com)"  # change email
+MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
+MB_REQUEST_DELAY = 1.1   # seconds between API calls (be polite)
+
+_last_mb_request_time = 0
+
+def _rate_limit():
+    """Ensure at least MB_REQUEST_DELAY seconds between MusicBrainz requests."""
+    global _last_mb_request_time
+    now = time.time()
+    wait = _last_mb_request_time + MB_REQUEST_DELAY - now
+    if wait > 0:
+        eventlet.sleep(wait)
+    _last_mb_request_time = time.time()
+
+def _get_cached_mb_data(artist_lower):
+    """Return (mbid, genres) from cache, or (None, None) if not cached."""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT mbid, genres FROM artist_musicbrainz_cache WHERE artist_lower=?", (artist_lower,))
+    row = c.fetchone()
+    conn.close()
+    return (row[0], row[1]) if row else (None, None)
+
+def _save_mb_cache(artist_lower, mbid, genres):
+    """Insert or update the MusicBrainz cache entry."""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    genres_str = ",".join(genres) if genres else ""
+    c.execute("INSERT OR REPLACE INTO artist_musicbrainz_cache (artist_lower, mbid, genres, fetched_at) VALUES (?,?,?,?)",
+              (artist_lower, mbid, genres_str, int(time.time())))
+    conn.commit()
+    conn.close()
+
+# def _search_artist_mbid(artist_name):
+#     """Search MusicBrainz for an artist and return the first MBID, or None."""
+#     _rate_limit()
+#     params = {
+#         "query": f'artist:"{artist_name}"',
+#         "fmt": "json",
+#         "limit": 1
+#     }
+#     headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
+#     try:
+#         resp = requests.get(f"{MUSICBRAINZ_API_BASE}/artist/", params=params, headers=headers, timeout=10)
+#         if resp.status_code != 200:
+#             return None
+#         data = resp.json()
+#         artists = data.get("artists", [])
+#         if not artists:
+#             return None
+#         return artists[0]["id"]
+#     except Exception as e:
+#         print(f"MusicBrainz artist search error: {e}")
+#         return None
+# 
+# def _fetch_artist_tags(mbid):
+#     """Fetch genre tags for a MusicBrainz artist ID. Returns a list of tag names."""
+#     _rate_limit()
+#     params = {"inc": "tags", "fmt": "json"}
+#     headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
+#     try:
+#         resp = requests.get(f"{MUSICBRAINZ_API_BASE}/artist/{mbid}", params=params, headers=headers, timeout=10)
+#         if resp.status_code != 200:
+#             return []
+#         data = resp.json()
+#         tags = data.get("tags", [])
+#         # Sort by tag count (popularity) descending, take names
+#         sorted_tags = sorted(tags, key=lambda t: t.get("count", 0), reverse=True)
+#         return [t["name"] for t in sorted_tags]
+#     except Exception as e:
+#         print(f"MusicBrainz tag fetch error: {e}")
+#         return []
+
+def _mb_request(url, params, max_retries=3):
+    """Wrapper for MusicBrainz API calls with retry on transient errors."""
+    headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
+    for attempt in range(max_retries):
+        _rate_limit()
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                return resp
+            elif resp.status_code == 503:
+                # Server busy – wait a bit longer
+                print(f"   MusicBrainz busy (503), retrying in {2 ** attempt} sec...")
+                eventlet.sleep(2 ** attempt)
+            else:
+                print(f"   MusicBrainz returned {resp.status_code}, skipping.")
+                return None
+        except requests.exceptions.SSLError as e:
+            print(f"   SSL error (attempt {attempt+1}): {e}")
+            eventlet.sleep(1)
+        except requests.exceptions.ConnectionError as e:
+            print(f"   Connection error (attempt {attempt+1}): {e}")
+            eventlet.sleep(1)
+        except Exception as e:
+            print(f"   Unexpected request error: {e}")
+            return None
+    return None
+
+def _search_artist_mbid(artist_name):
+    """Search MusicBrainz for an artist and return the first MBID, or None."""
+    params = {
+        "query": f'artist:"{artist_name}"',
+        "fmt": "json",
+        "limit": 1
+    }
+    resp = _mb_request(f"{MUSICBRAINZ_API_BASE}/artist/", params)
+    if not resp:
+        return None
+    try:
+        data = resp.json()
+        artists = data.get("artists", [])
+        return artists[0]["id"] if artists else None
+    except Exception as e:
+        print(f"   Error parsing search response: {e}")
+        return None
+
+def _fetch_artist_tags(mbid):
+    """Fetch genre tags for a MusicBrainz artist ID. Returns a list of tag names."""
+    params = {"inc": "tags", "fmt": "json"}
+    resp = _mb_request(f"{MUSICBRAINZ_API_BASE}/artist/{mbid}", params)
+    if not resp:
+        return []
+    try:
+        data = resp.json()
+        tags = data.get("tags", [])
+        sorted_tags = sorted(tags, key=lambda t: t.get("count", 0), reverse=True)
+        return [t["name"] for t in sorted_tags]
+    except Exception as e:
+        print(f"   Error parsing tags response: {e}")
+        return []
+
+def get_musicbrainz_genres(artist_name):
+    """
+    Return a list of genre strings for the given artist.
+    Uses local cache to avoid repeated API calls.
+    Returns empty list if lookup fails.
+    """
+    artist_lower = artist_name.strip().lower()
+    if not artist_lower:
+        return []
+
+    mbid, cached_genres = _get_cached_mb_data(artist_lower)
+    if cached_genres is not None:
+        # return cached genres (even if empty string means no genres found previously)
+        return [g.strip() for g in cached_genres.split(",") if g.strip()]
+
+    # Not cached – perform lookup
+    print(f"🔍 MusicBrainz: looking up artist '{artist_name}'")
+    mbid = _search_artist_mbid(artist_name)
+    if not mbid:
+        # Cache the failure (empty genres) to avoid repeated searches
+        _save_mb_cache(artist_lower, "", [])
+        return []
+
+    genres = _fetch_artist_tags(mbid)
+    if genres:
+        print(f"   Found genres: {', '.join(genres[:5])}")
+    else:
+        print("   No genres found.")
+
+    _save_mb_cache(artist_lower, mbid, genres)
+    return genres
+
 # ------------------------- LAST.FM INTEGRATION -------------------------
 def get_lastfm_credentials():
     try:
@@ -240,6 +410,7 @@ def scrobble_to_lastfm(network, artist, title, album, timestamp):
 def init_db():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL;") 
     c.execute('''CREATE TABLE IF NOT EXISTS scrobbles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp INTEGER NOT NULL,
@@ -263,6 +434,19 @@ def init_db():
     migrate_album_genre_db()
     migrate_artist_genre_db()
     migrate_album_genre_db()
+    migrate_musicbrainz_cache_db()
+
+def migrate_musicbrainz_cache_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS artist_musicbrainz_cache (
+        artist_lower TEXT PRIMARY KEY,
+        mbid TEXT,
+        genres TEXT,
+        fetched_at INTEGER
+    )''')
+    conn.commit()
+    conn.close()
 
 def migrate_db():
     conn = sqlite3.connect(DATABASE)
@@ -315,30 +499,42 @@ def migrate_artist_genre_db():
 def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
     timestamp = int(time.time())
     genre = None
+
+    # --- Determine genre with priority: Artist > Album > MusicBrainz > Playlist ---
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
-    
+
     # 1. Artist genre (highest priority)
     c.execute("SELECT genre FROM artist_genre_map WHERE artist = ?", (artist,))
     row = c.fetchone()
     if row:
         genre = row[0]
     else:
-        # 2. Album genre (artist + album)
+        # 2. Album genre
         if album:
             c.execute("SELECT genre FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
             row = c.fetchone()
             if row:
                 genre = row[0]
-        # 3. Playlist genre (lowest priority)
-        if not genre and playlist:
-            c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
-            row = c.fetchone()
-            if row:
-                genre = row[0]
     conn.close()
-    
-    # Insert into scrobbles (including the determined genre)
+
+    # 3. MusicBrainz auto‑suggestion (now before playlist)
+    if not genre:
+        mb_genres = get_musicbrainz_genres(artist)
+        if mb_genres:
+            genre = mb_genres[0]
+
+    # 4. Playlist genre (lowest priority)
+    if not genre and playlist:
+        conn = sqlite3.connect(DATABASE)
+        c = conn.cursor()
+        c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
+        row = c.fetchone()
+        if row:
+            genre = row[0]
+        conn.close()
+
+    # --- Insert into scrobbles (including the determined genre) ---
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute('''INSERT INTO scrobbles 
@@ -348,7 +544,8 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
     conn.commit()
     conn.close()
     print(f"📀 Scrobbled locally: {artist} - {track}" + (f" [playlist: {playlist}]" if playlist else "") + (f" [genre: {genre}]" if genre else ""))
-    # Send to Last.fm (unchanged)
+
+    # Send to Last.fm
     network = get_lastfm_network()
     if network:
         scrobble_to_lastfm(network, artist, track, album, timestamp)
@@ -1399,6 +1596,35 @@ def api_artists_without_genre():
     rows = c.fetchall()
     conn.close()
     return jsonify([row[0] for row in rows])
+
+@app.route('/api/backfill_musicbrainz_genres', methods=['POST'])
+def api_backfill_musicbrainz_genres():
+    # Fetch all untagged scrobble IDs and artists into memory
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT id, artist FROM scrobbles WHERE genre IS NULL OR genre=''")
+    rows = c.fetchall()
+    conn.close()   # release the lock immediately
+
+    updated = 0
+    for row in rows:
+        artist = row["artist"]
+        if not artist:
+            continue
+        genres = get_musicbrainz_genres(artist)  # safe: no other connection held
+        if genres:
+            genre = genres[0]
+            # Open a fresh connection for the single UPDATE
+            conn2 = sqlite3.connect(DATABASE)
+            c2 = conn2.cursor()
+            c2.execute("UPDATE scrobbles SET genre=? WHERE id=?", (genre, row["id"]))
+            conn2.commit()
+            conn2.close()
+            updated += 1
+
+    print(f"🎵 MusicBrainz backfill: {updated} scrobbles updated.")
+    return jsonify({"status": "ok", "updated": updated})
 
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
@@ -2708,6 +2934,7 @@ MONTHLY_TEMPLATE = """
         <div style="display: flex; gap: 10px; margin-top: 1rem; flex-wrap: wrap;">
             <button id="backfillArtistGenresBtn" class="backfill-btn">Backfill Artist Genres</button>
             <button id="backfillAlbumGenresBtn" class="backfill-btn">Backfill Album Genres</button>
+            <button id="backfillMBGenresBtn" class="backfill-btn" style="background: #6c757d;">🧠 Backfill MusicBrainz Genres</button>
         </div>
     </div>
 
@@ -3224,6 +3451,14 @@ MONTHLY_TEMPLATE = """
     document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
     document.getElementById('saveArtistGenreDropdown').addEventListener('click', saveArtistFromDropdown);
     document.getElementById('clearArtistDropdownBtn').addEventListener('click', clearArtistDropdown);
+    
+    document.getElementById('backfillMBGenresBtn').addEventListener('click', () => {
+        if (!confirm("Update all scrobbles without a manual genre using MusicBrainz suggestions? This may take a while.")) return;
+        fetch('/api/backfill_musicbrainz_genres', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => alert(`MusicBrainz backfill complete. ${data.updated} scrobbles updated.`))
+            .catch(e => alert('Error: ' + e));
+    });    
 
     // Initialise everything
     populateDateSelects();
