@@ -1258,6 +1258,20 @@ def api_current_genre():
 
     return jsonify({"genre": genre})
 
+@app.route('/api/last_scrobbled')
+def api_last_scrobbled():
+    artist = request.args.get('artist', '')
+    track = request.args.get('track', '')
+    if not artist or not track:
+        return jsonify({"timestamp": None})
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT MAX(timestamp) FROM scrobbles WHERE artist=? AND track=?", (artist, track))
+    row = c.fetchone()
+    conn.close()
+    ts = row[0] if row[0] else None
+    return jsonify({"timestamp": ts})
+
 @app.route('/api/search_scrobbles')
 def api_search_scrobbles():
     track = request.args.get('track', '')
@@ -1794,6 +1808,7 @@ HTML_TEMPLATE = """
                 <div id="track" class="track"></div>
                 <div id="artist" class="artist"></div>
                 <div id="album" class="album"></div>
+                <div id="lastScrobbled" style="font-size:0.85em; color:#aaa; margin-top:2px;"></div>
                 <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
                     <div id="progress" class="progress"></div>
@@ -1952,6 +1967,20 @@ function setupRetagButton() {
     }
 }
 
+function formatRelativeTimeShort(ts) {
+    const diff = Math.floor((Date.now() / 1000) - ts);
+    if (diff < 60) return 'just now';
+    const mins = Math.floor(diff / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 4) return `${weeks}w ago`;
+    return new Date(ts * 1000).toLocaleDateString();
+}
+
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     document.getElementById('artist').innerText = data.artist;
@@ -1977,6 +2006,18 @@ function updateUI(data) {
     
     let playlistName = data.playing_from.replace(/^Playing from: /, '');
     fetchCurrentGenre(data.artist, data.album, playlistName);
+    // Fetch last scrobbled time
+    fetch(`/api/last_scrobbled?artist=${encodeURIComponent(data.artist)}&track=${encodeURIComponent(data.track)}`)
+        .then(r => r.json())
+        .then(res => {
+            const el = document.getElementById('lastScrobbled');
+            if (res.timestamp) {
+                el.innerText = `Last played: ${formatRelativeTimeShort(res.timestamp)}`;
+            } else {
+                el.innerText = '';
+            }
+        })
+        .catch(() => {});    
 }
 
 socket.on('update', (data) => updateUI(data));
