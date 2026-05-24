@@ -103,6 +103,20 @@ def backup_database():
         print(f"❌ Backup failed: {e}")
         return None
 
+def migrate_favourites_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS favourites (
+        artist TEXT NOT NULL,
+        track TEXT NOT NULL,
+        album TEXT,
+        art_url TEXT,
+        added_at INTEGER NOT NULL,
+        PRIMARY KEY (artist, track)
+    )''')
+    conn.commit()
+    conn.close()
+
 def cleanup_old_backups():
     """Remove oldest backups exceeding MAX_BACKUPS."""
     backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "scrobbles_*.db")))
@@ -433,6 +447,7 @@ def init_db():
     migrate_album_genre_db()
     migrate_musicbrainz_cache_db()
     migrate_indexes()
+    migrate_favourites_db()
 
 def migrate_indexes():
     conn = sqlite3.connect(DATABASE)
@@ -940,6 +955,57 @@ def api_scrobbles():
     scrobbles = get_all_scrobbles(limit, offset)
     total = count_scrobbles()
     return jsonify({"scrobbles": scrobbles, "total": total})
+
+@app.route('/api/favourite/check')
+def api_favourite_check():
+    artist = request.args.get('artist', '')
+    track = request.args.get('track', '')
+    if not artist or not track:
+        return jsonify({"favourite": False})
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM favourites WHERE artist=? AND track=?", (artist, track))
+    row = c.fetchone()
+    conn.close()
+    return jsonify({"favourite": row is not None})
+
+@app.route('/api/favourite/toggle', methods=['POST'])
+def api_favourite_toggle():
+    data = request.get_json()
+    artist = data.get('artist')
+    track = data.get('track')
+    album = data.get('album', '')
+    art_url = data.get('art_url', '')
+    if not artist or not track:
+        return jsonify({"error": "Missing artist or track"}), 400
+
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM favourites WHERE artist=? AND track=?", (artist, track))
+    exists = c.fetchone()
+    if exists:
+        c.execute("DELETE FROM favourites WHERE artist=? AND track=?", (artist, track))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "removed"})
+    else:
+        c.execute("INSERT INTO favourites (artist, track, album, art_url, added_at) VALUES (?,?,?,?,?)",
+                  (artist, track, album, art_url, int(time.time())))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "added"})
+
+@app.route('/api/favourites')
+def api_favourites():
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM favourites ORDER BY added_at DESC LIMIT ? OFFSET ?", (limit, offset))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
 
 @app.route('/api/now')
 def api_now():
@@ -1805,7 +1871,10 @@ HTML_TEMPLATE = """
         <div class="card">
             <img id="art" class="art" src="" />
             <div class="info">
-                <div id="track" class="track"></div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button id="favBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add to favourites">🤍</button>
+                    <div id="track" class="track"></div>
+                </div>
                 <div id="artist" class="artist"></div>
                 <div id="album" class="album"></div>
                 <div id="lastScrobbled" class="last-scrobbled"></div>
@@ -1982,6 +2051,7 @@ function setupRetagButton() {
 
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
+    checkFavourite(data.artist, data.track);
     document.getElementById('artist').innerText = data.artist;
     document.getElementById('album').innerText = data.album;
     document.getElementById('playingFrom').innerHTML = data.playing_from;
@@ -2019,6 +2089,49 @@ function updateUI(data) {
         })
         .catch(() => {});
 }
+
+let isFavourite = false;
+
+function updateFavButton() {
+    const btn = document.getElementById('favBtn');
+    btn.innerHTML = isFavourite ? '❤️' : '🤍';
+    btn.title = isFavourite ? 'Remove from favourites' : 'Add to favourites';
+}
+
+function checkFavourite(artist, track) {
+    fetch(`/api/favourite/check?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`)
+        .then(r => r.json())
+        .then(data => {
+            isFavourite = data.favourite;
+            updateFavButton();
+        })
+        .catch(() => {});
+}
+
+document.getElementById('favBtn').addEventListener('click', () => {
+    if (!currentArtist || !document.getElementById('track').innerText) return;
+    const track = document.getElementById('track').innerText;
+    const album = currentAlbum || '';
+    const art = document.getElementById('art').src || '';
+    fetch('/api/favourite/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ artist: currentArtist, track: track, album: album, art_url: art })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'added') {
+            isFavourite = true;
+        } else if (data.status === 'removed') {
+            isFavourite = false;
+        }
+        updateFavButton();
+    })
+    .catch(e => console.error(e));
+});
+
+// Inside updateUI(), after the line that sets track title:
+// checkFavourite(data.artist, data.track);
 
 socket.on('update', (data) => updateUI(data));
 socket.on('connect', () => console.log('Connected'));
@@ -2400,6 +2513,12 @@ SCROBBLES_TEMPLATE = """
             <h3>🥧 Genre Distribution</h3>
             <canvas id="genrePieChart" width="300" height="200"></canvas>
         </div>
+        <div class="stat-card">
+            <h3>❤️ Recent Favourites</h3>
+            <ul class="stat-list" id="favouritesList">
+                <li>Loading...</li>
+            </ul>
+        </div>
     </div>
 
     <div class="tools">
@@ -2566,6 +2685,28 @@ SCROBBLES_TEMPLATE = """
             })
             .catch(e => console.error('Top genres error:', e));
     }
+
+    function fetchFavourites() {
+        fetch('/api/favourites?limit=10')
+            .then(r => r.json())
+            .then(data => {
+                const list = document.getElementById('favouritesList');
+                if (data.length === 0) {
+                    list.innerHTML = '<li>No favourites yet</li>';
+                    return;
+                }
+                list.innerHTML = data.map(f => `
+                    <li>
+                        <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
+                        <span>${escapeHtml(f.artist)} – ${escapeHtml(f.track)}</span>
+                    </li>
+                `).join('');
+            })
+            .catch(e => console.error('Favourites error:', e));
+    }
+
+    // Call it along with other fetch functions
+    fetchFavourites();
 
     // New function: fetch genre distribution for pie chart
     function fetchGenreDistribution() {
