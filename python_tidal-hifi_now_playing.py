@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template_string, request, jsonify, send_file
 from flask_socketio import SocketIO
 import io
-
+import fcntl
 
 
 # ------------------------- CONFIGURATION -------------------------
@@ -530,6 +530,20 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
         if row:
             genre = row[0]
         conn.close()
+
+    # --- Deduplication: skip if the same track/artist was scrobbled in the last 5 seconds ---
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""SELECT id FROM scrobbles 
+                 WHERE track=? AND artist=? 
+                   AND timestamp BETWEEN ? AND ? 
+                 LIMIT 1""",
+              (track, artist, timestamp - 5, timestamp))
+    existing = c.fetchone()
+    conn.close()
+    if existing:
+        print(f"⏭️ Duplicate scrobble skipped: {artist} - {track} (already scrobbled within 5 seconds)")
+        return  # do not insert
 
     # --- Insert into scrobbles (including the determined genre) ---
     conn = sqlite3.connect(DATABASE)
@@ -1644,6 +1658,35 @@ def api_backfill_musicbrainz_genres():
 
     print(f"🎵 MusicBrainz backfill: {total_updated} scrobbles updated.")
     return jsonify({"status": "ok", "updated": total_updated})
+
+
+# ======================== HTML TEMPLATES ========================
+HTML_TEMPLATE = """..."""   # <-- paste the exact HTML_TEMPLATE string from earlier
+SCROBBLES_TEMPLATE = """..."""   # <-- paste the exact SCROBBLES_TEMPLATE string
+MONTHLY_TEMPLATE = """..."""   # <-- paste the exact MONTHLY_TEMPLATE string
+
+# ------------------------- MAIN -------------------------
+def signal_handler(sig, frame):
+    print("\n👋 Goodbye!")
+    sys.exit(0)
+
+if __name__ == '__main__':
+    init_db()
+    poller_thread = threading.Thread(target=background_poller, daemon=True)
+    poller_thread.start()
+    
+    # Start the backup scheduler as a cooperative greenlet
+    eventlet.spawn(backup_scheduler)
+    
+    print(f"✅ TIDAL HIFI FULL SCROBBLER (with genre tagging)")
+    print(f"📀 Database: {DATABASE}")
+    print("🌐 Player: http://127.0.0.1:5000")
+    print("📊 Overview: http://127.0.0.1:5000/scrobbles")
+    print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
 
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
@@ -3501,6 +3544,21 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 if __name__ == '__main__':
+    import fcntl   # move import to top of file or keep here – it's fine
+
+    # --- Prevent duplicate instances ---
+    LOCK_FILE = os.path.join(SCRIPT_DIR, "scrobbler.lock")
+    lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_fd.write(str(os.getpid()))
+        lock_fd.flush()
+    except IOError:
+        print("❌ Another instance is already running. Exiting.")
+        sys.exit(1)
+    print("🔒 Lock acquired – only one instance running.")
+    # --- End duplicate check ---
+
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
@@ -3515,7 +3573,5 @@ if __name__ == '__main__':
     print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
     
     signal.signal(signal.SIGINT, signal_handler)
-    
-    
     
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
