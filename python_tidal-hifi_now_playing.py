@@ -1659,35 +1659,6 @@ def api_backfill_musicbrainz_genres():
     print(f"🎵 MusicBrainz backfill: {total_updated} scrobbles updated.")
     return jsonify({"status": "ok", "updated": total_updated})
 
-
-# ======================== HTML TEMPLATES ========================
-HTML_TEMPLATE = """..."""   # <-- paste the exact HTML_TEMPLATE string from earlier
-SCROBBLES_TEMPLATE = """..."""   # <-- paste the exact SCROBBLES_TEMPLATE string
-MONTHLY_TEMPLATE = """..."""   # <-- paste the exact MONTHLY_TEMPLATE string
-
-# ------------------------- MAIN -------------------------
-def signal_handler(sig, frame):
-    print("\n👋 Goodbye!")
-    sys.exit(0)
-
-if __name__ == '__main__':
-    init_db()
-    poller_thread = threading.Thread(target=background_poller, daemon=True)
-    poller_thread.start()
-    
-    # Start the backup scheduler as a cooperative greenlet
-    eventlet.spawn(backup_scheduler)
-    
-    print(f"✅ TIDAL HIFI FULL SCROBBLER (with genre tagging)")
-    print(f"📀 Database: {DATABASE}")
-    print("🌐 Player: http://127.0.0.1:5000")
-    print("📊 Overview: http://127.0.0.1:5000/scrobbles")
-    print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False)
-
 # ------------------------- HTML TEMPLATES -------------------------
 HTML_TEMPLATE = """
 <!DOCTYPE html>
