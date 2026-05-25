@@ -3005,11 +3005,13 @@ function fetchFavouriteAlbums() {
                 return;
             }
             list.innerHTML = data.map(f => `
-                <li>
+                <li style="display: flex; align-items: center; gap: 8px;">
                     <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
-                    <span>${escapeHtml(f.artist)} – ${escapeHtml(f.album)}</span>
+                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.artist)} – ${escapeHtml(f.album)}</span>
+                    <button class="delete-fav-album-btn" data-artist="${escapeHtml(f.artist)}" data-album="${escapeHtml(f.album)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Remove from favourites">❌</button>
                 </li>
             `).join('');
+            attachFavAlbumDeleteHandlers();
         })
         .catch(e => console.error('Favourite albums error:', e));
 }
@@ -3112,6 +3114,29 @@ fetchFavouriteAlbums();
             btn._listener = listener;
         });
     }
+
+function attachFavAlbumDeleteHandlers() {
+    document.querySelectorAll('.delete-fav-album-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const artist = this.dataset.artist;
+            const album = this.dataset.album;
+            if (!confirm(`Remove "${artist} – ${album}" from favourite albums?`)) return;
+            fetch('/api/favourite_album/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ artist, album })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'removed') {
+                    fetchFavouriteAlbums();   // refresh the list
+                }
+            })
+            .catch(e => console.error('Error removing favourite album:', e));
+        });
+    });
+}
 
     async function deleteScrobble(scrobbleId, rowElement) {
         if (!confirm("Are you sure you want to delete this scrobble? This cannot be undone.")) return;
