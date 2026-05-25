@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import eventlet
 import logging
-import logging
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
@@ -68,15 +67,6 @@ session = {
 # Playlists to ignore (do not store playlist name, treat as album)
 IGNORED_PLAYLISTS = {"Top Tracks", "Mix", "My Daily Discovery"}  # add any others you want to ignore
 
-# MusicBrainz tags to ignore (case‑insensitive)
-MUSICBRAINZ_TAG_BLACKLIST = {
-    "seen live", "favourites", "uk", "favorite", "favorites",
-    "live", "concert", "concerts", "my collection", "library",
-    "albums i own", "owned", "love", "awesome", "seen live",
-    "best of", "top 10", "check out", "australian", "canadian", 
-    "_edit", "production music"
-}
-
 # ------------------------- BACKUP SYSTEM -------------------------
 import glob
 import shutil
@@ -128,6 +118,57 @@ def migrate_artist_ignore_genre():
     )''')
     conn.commit()
     conn.close()
+
+def migrate_mb_blacklist_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS musicbrainz_tag_blacklist (
+        tag TEXT PRIMARY KEY
+    )''')
+    conn.commit()
+    conn.close()
+
+def get_mb_tag_blacklist():
+    """Return a set of blacklisted MusicBrainz tags (lowercased)."""
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT tag FROM musicbrainz_tag_blacklist")
+    rows = c.fetchall()
+    conn.close()
+    return {row[0].lower() for row in rows}
+
+@app.route('/api/mb_blacklist/add', methods=['POST'])
+def api_mb_blacklist_add():
+    tag = request.get_json().get('tag', '').strip()
+    if not tag:
+        return jsonify({"error": "Missing tag"}), 400
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO musicbrainz_tag_blacklist (tag) VALUES (?)", (tag.lower(),))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "tag": tag.lower()})
+
+@app.route('/api/mb_blacklist')
+def api_mb_blacklist():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT tag FROM musicbrainz_tag_blacklist ORDER BY tag")
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([row[0] for row in rows])
+
+@app.route('/api/mb_blacklist/remove', methods=['POST'])
+def api_mb_blacklist_remove():
+    tag = request.get_json().get('tag', '').strip()
+    if not tag:
+        return jsonify({"error": "Missing tag"}), 400
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("DELETE FROM musicbrainz_tag_blacklist WHERE tag = ?", (tag.lower(),))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
 
 def cleanup_old_backups():
     """Remove oldest backups exceeding MAX_BACKUPS."""
@@ -317,32 +358,6 @@ def _mb_request(url, params, max_retries=3):
             return None
     return None
 
-    """Wrapper for MusicBrainz API calls with retry on transient errors."""
-    headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
-    for attempt in range(max_retries):
-        _rate_limit()
-        try:
-            resp = requests.get(url, params=params, headers=headers, timeout=15)
-            if resp.status_code == 200:
-                return resp
-            elif resp.status_code == 503:
-                # Server busy – wait a bit longer
-                print(f"   MusicBrainz busy (503), retrying in {2 ** attempt} sec...")
-                eventlet.sleep(2 ** attempt)
-            else:
-                print(f"   MusicBrainz returned {resp.status_code}, skipping.")
-                return None
-        except requests.exceptions.SSLError as e:
-            print(f"   SSL error (attempt {attempt+1}): {e}")
-            eventlet.sleep(1)
-        except requests.exceptions.ConnectionError as e:
-            print(f"   Connection error (attempt {attempt+1}): {e}")
-            eventlet.sleep(1)
-        except Exception as e:
-            print(f"   Unexpected request error: {e}")
-            return None
-    return None
-
 def _search_artist_mbid(artist_name):
     """Search MusicBrainz for an artist and return the first MBID, or None."""
     params = {
@@ -386,32 +401,38 @@ def get_musicbrainz_genres(artist_name):
     if not artist_lower:
         return []
 
+    # Check cache first
     mbid, cached_genres = _get_cached_mb_data(artist_lower)
     if cached_genres is not None:
-        # return cached genres (even if empty string means no genres found previously)
+        # cached genres are already filtered (saved below)
         return [g.strip() for g in cached_genres.split(",") if g.strip()]
 
     # Not cached – perform lookup
     print(f"🔍 MusicBrainz: looking up artist '{artist_name}'")
     mbid = _search_artist_mbid(artist_name)
     if not mbid:
-        # Cache the failure (empty genres) to avoid repeated searches
         _save_mb_cache(artist_lower, "", [])
         return []
 
     genres = _fetch_artist_tags(mbid)
+    if not genres:
+        print("   No genres found.")
+        _save_mb_cache(artist_lower, "", [])
+        return []
+
+    # Filter out blacklisted tags BEFORE caching
+    blacklist = get_mb_tag_blacklist()
+    genres = [g for g in genres if g.lower() not in blacklist]
+
     if genres:
         print(f"   Found genres: {', '.join(genres[:5])}")
     else:
-        print("   No genres found.")
+        print("   All genres blacklisted or empty.")
 
+    # Save the already‑filtered list
     _save_mb_cache(artist_lower, mbid, genres)
-    
-    # Filter out blacklisted tags (case‑insensitive)
-    genres = [g for g in genres if g.lower() not in MUSICBRAINZ_TAG_BLACKLIST]
-    
     return genres
-    
+
 # ------------------------- LAST.FM INTEGRATION -------------------------
 def get_lastfm_credentials():
     try:
@@ -494,6 +515,7 @@ def init_db():
     migrate_indexes()
     migrate_favourites_db()
     migrate_artist_ignore_genre()
+    migrate_mb_blacklist_db()
 
 def migrate_indexes():
     conn = sqlite3.connect(DATABASE)
@@ -1335,6 +1357,7 @@ def api_current_genre():
     album = request.args.get('album', '')
     playlist = request.args.get('playlist', '')
     genre = None
+    source = None
 
     # 1. Artist mapping
     if artist:
@@ -1344,6 +1367,7 @@ def api_current_genre():
         row = c.fetchone()
         if row:
             genre = row[0]
+            source = 'artist'
         conn.close()
 
     # 2. Album mapping
@@ -1354,15 +1378,17 @@ def api_current_genre():
         row = c.fetchone()
         if row:
             genre = row[0]
+            source = 'album'
         conn.close()
 
-    # 3. MusicBrainz (new – live fallback)
+    # 3. MusicBrainz
     if not genre and artist:
         mb_genres = get_musicbrainz_genres(artist)
         if mb_genres:
             genre = mb_genres[0]
+            source = 'musicbrainz'
 
-    # 4. Playlist mapping (lowest priority)
+    # 4. Playlist mapping
     if not genre and playlist:
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
@@ -1370,9 +1396,10 @@ def api_current_genre():
         row = c.fetchone()
         if row:
             genre = row[0]
+            source = 'playlist'
         conn.close()
 
-    return jsonify({"genre": genre})
+    return jsonify({"genre": genre, "source": source})
 
 @app.route('/api/last_scrobbled')
 def api_last_scrobbled():
@@ -1961,6 +1988,7 @@ HTML_TEMPLATE = """
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="currentGenre" class="genre-badge" style="display: none;"></span>
+                        <button id="mbIgnoreBtn" class="btn-sm" style="display:none; background:rgba(255,255,255,0.08); border:none; color:#ccc; padding:2px 6px; border-radius:8px; cursor:pointer; font-size:0.8em;" title="Ignore this MusicBrainz tag">🚫</button>
                         <button id="mbRetagBtn" class="btn-sm" style="display:none; background:rgba(255,255,255,0.08); border:none; color:#ccc; padding:2px 6px; border-radius:8px; cursor:pointer; font-size:0.8em;" title="Re‑fetch MusicBrainz genre">🔄</button>
                         <span id="qualityBadge" class="quality-badge"></span>
                     </div>
@@ -2052,6 +2080,7 @@ function fetchCurrentGenre(artist, album, playlist) {
         .then(data => {
             const genreSpan = document.getElementById('currentGenre');
             const retagBtn = document.getElementById('mbRetagBtn');
+            const ignoreBtn = document.getElementById('mbIgnoreBtn');
             if (data.genre && data.genre !== '') {
                 let displayGenre = data.genre;
                 if (!displayGenre.startsWith('🏷️')) {
@@ -2060,9 +2089,16 @@ function fetchCurrentGenre(artist, album, playlist) {
                 genreSpan.innerText = displayGenre;
                 genreSpan.style.display = 'inline-flex';
                 retagBtn.style.display = 'inline-block';
+                // Show ignore button ONLY if the genre came from MusicBrainz
+                if (data.source === 'musicbrainz') {
+                    ignoreBtn.style.display = 'inline-block';
+                } else {
+                    ignoreBtn.style.display = 'none';
+                }
             } else {
                 genreSpan.style.display = 'none';
                 retagBtn.style.display = 'none';
+                ignoreBtn.style.display = 'none';
             }
         })
         .catch(e => console.error("Genre fetch error:", e));
@@ -2106,6 +2142,9 @@ function setupRetagButton() {
                     } else {
                         alert('MusicBrainz returned no genres for this artist.');
                     }
+                    // Delete the artist’s cache entry so we fetch fresh tags from MusicBrainz
+                    fetch(`/api/mb_retag_artist/${encodeURIComponent(currentArtist)}`)
+                        .catch(() => {});
                     fetchCurrentGenre(currentArtist, currentAlbum, currentPlaylist);
                 })
                 .catch(e => alert('Retag failed: ' + e))
@@ -2113,6 +2152,51 @@ function setupRetagButton() {
                     btn.disabled = false;
                     btn.innerText = '🔄';
                 });
+        });
+        document.getElementById('mbIgnoreBtn').addEventListener('click', () => {
+            if (!currentArtist) return;
+            const genreText = document.getElementById('currentGenre').innerText.replace('🏷️ ', '').trim();
+            if (!genreText) return;
+            if (!confirm(`Ignore MusicBrainz tag "${genreText}"?`)) return;
+
+            const btn = document.getElementById('mbIgnoreBtn');
+            btn.disabled = true;
+            btn.innerText = '⏳';
+
+            // Step 1: add the tag to the blacklist
+            fetch('/api/mb_blacklist/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ tag: genreText })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status !== 'ok') {
+                    alert('Error: ' + (data.error || 'unknown'));
+                    btn.disabled = false;
+                    btn.innerText = '🚫';
+                    return;
+                }
+
+                // Step 2: clear the artist's MusicBrainz cache (so next lookup is fresh)
+                return fetch(`/api/mb_retag_artist/${encodeURIComponent(currentArtist)}`);
+            })
+            .then(r => r && r.json())
+            .then(retagData => {
+                if (retagData && retagData.status === 'ok') {
+                    // Step 3: re‑fetch the genre (now filtered with the updated blacklist)
+                    fetchCurrentGenre(currentArtist, currentAlbum, currentPlaylist);
+                } else if (retagData) {
+                    alert('Cache cleared, but genre re‑fetch may have failed.');
+                }
+                btn.disabled = false;
+                btn.innerText = '🚫';
+            })
+            .catch(e => {
+                alert('Request failed: ' + e);
+                btn.disabled = false;
+                btn.innerText = '🚫';
+            });
         });
     }
 }
