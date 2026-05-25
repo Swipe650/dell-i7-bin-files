@@ -1732,6 +1732,23 @@ def api_artists_without_genre():
     conn.close()
     return jsonify([row[0] for row in rows])
 
+@app.route('/api/ignore_artist_no_genre', methods=['POST'])
+def api_ignore_artist_no_genre():
+    data = request.get_json()
+    artist = data.get('artist', '').strip()
+    if not artist:
+        return jsonify({"error": "Missing artist name"}), 400
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    try:
+        c.execute("INSERT OR IGNORE INTO artist_ignore_genre (artist) VALUES (?)", (artist,))
+        conn.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
 @app.route('/api/backfill_musicbrainz_genres', methods=['POST'])
 def api_backfill_musicbrainz_genres():
     # Fetch all untagged scrobble artists (distinct, to minimise API calls)
@@ -3515,28 +3532,58 @@ MONTHLY_TEMPLATE = """
         .catch(err => alert('Request failed: ' + err.message));
     }
 
-    // ========== TAG ARTIST VIA GENRE DROPDOWN ==========
-    function loadNoGenreArtists() {
-        const container = document.getElementById('noGenreArtistsList');
-        container.innerHTML = '<div class="empty-message">Loading...</div>';
-        fetch('/api/artists_without_genre')
-            .then(r => r.json())
-            .then(artists => {
-                if (artists.length === 0) {
-                    container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
-                    return;
-                }
-                let html = '<ul class="stat-list" style="max-height: 200px;">';
-                artists.forEach(artist => {
-                    html += `<li style="cursor:pointer; padding: 4px 0;" onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">${escapeHtml(artist)}</li>`;
-                });
-                html += '</ul>';
-                container.innerHTML = html;
-            })
-            .catch(e => {
-                console.error(e);
-                container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
+function loadNoGenreArtists() {
+    const container = document.getElementById('noGenreArtistsList');
+    container.innerHTML = '<div class="empty-message">Loading...</div>';
+    fetch('/api/artists_without_genre')
+        .then(r => r.json())
+        .then(artists => {
+            if (artists.length === 0) {
+                container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
+                return;
+            }
+            let html = '<ul class="stat-list" style="max-height: 200px;">';
+            artists.forEach(artist => {
+                html += `<li style="cursor:pointer; padding: 4px 0; display: flex; justify-content: space-between; align-items: center;"
+                           onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">
+                           <span>${escapeHtml(artist)}</span>
+                           <button class="ignore-artist-btn" data-artist="${escapeHtml(artist)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Ignore this artist">🚫</button>
+                         </li>`;
             });
+            html += '</ul>';
+            container.innerHTML = html;
+
+            // Attach click handlers for ignore buttons
+            document.querySelectorAll('.ignore-artist-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation(); // prevent filling the artist input
+                    const artist = this.dataset.artist;
+                    ignoreArtistNoGenre(artist);
+                });
+            });
+        })
+        .catch(e => {
+            console.error(e);
+            container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
+        });
+}
+
+    function ignoreArtistNoGenre(artist) {
+        fetch('/api/ignore_artist_no_genre', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist: artist })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                // Reload the list – the ignored artist will be gone
+                loadNoGenreArtists();
+            } else {
+                alert('Error: ' + (data.error || 'unknown'));
+            }
+        })
+        .catch(e => alert('Request failed: ' + e));
     }
 
     function populateGenreDropdown() {
