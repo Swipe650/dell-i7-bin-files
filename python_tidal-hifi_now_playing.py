@@ -31,6 +31,29 @@ from flask_socketio import SocketIO
 import io
 import fcntl
 
+import builtins
+import functools
+
+# Throttle identical print messages to once every 10 seconds
+_original_print = builtins.print
+_print_last = {}
+_PRINT_THROTTLE_SEC = 10
+
+@functools.wraps(_original_print)
+def throttled_print(*args, **kwargs):
+    msg = " ".join(str(a) for a in args)
+    # Only throttle if there are no keyword arguments (normal print)
+    if kwargs:
+        return _original_print(*args, **kwargs)
+    now = time.time()
+    last = _print_last.get(msg, 0)
+    if now - last > _PRINT_THROTTLE_SEC:
+        _print_last[msg] = now
+        _original_print(*args, **kwargs)
+
+builtins.print = throttled_print
+
+_last_http_error_time = 0
 
 # ------------------------- CONFIGURATION -------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -250,7 +273,7 @@ MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (kerr_avon@live.com)"  # change ema
 MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
 MB_REQUEST_DELAY = 1.1   # seconds between API calls (be polite)
 
-_last_mb_request_time = 0
+_last_mb_error_time = 0
 
 def _rate_limit():
     """Ensure at least MB_REQUEST_DELAY seconds between MusicBrainz requests."""
@@ -281,6 +304,38 @@ def _save_mb_cache(artist_lower, mbid, genres):
     conn.close()
 
 def _mb_request(url, params, max_retries=3):
+    """Wrapper for MusicBrainz API calls with retry on transient errors."""
+    global _last_mb_error_time    # add this line
+    headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
+    for attempt in range(max_retries):
+        _rate_limit()
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                return resp
+            elif resp.status_code == 503:
+                print(f"   MusicBrainz busy (503), retrying in {2 ** attempt} sec...")
+                eventlet.sleep(2 ** attempt)
+            else:
+                print(f"   MusicBrainz returned {resp.status_code}, skipping.")
+                return None
+        except requests.exceptions.SSLError as e:
+            if time.time() - _last_mb_error_time > 10:
+                print(f"   SSL error (attempt {attempt+1}): {e}")
+                _last_mb_error_time = time.time()
+            eventlet.sleep(1)
+        except requests.exceptions.ConnectionError as e:
+            if time.time() - _last_mb_error_time > 10:
+                print(f"   Connection error (attempt {attempt+1}): {e}")
+                _last_mb_error_time = time.time()
+            eventlet.sleep(1)
+        except Exception as e:
+            if time.time() - _last_mb_error_time > 10:
+                print(f"   Unexpected request error: {e}")
+                _last_mb_error_time = time.time()
+            return None
+    return None
+
     """Wrapper for MusicBrainz API calls with retry on transient errors."""
     headers = {"User-Agent": MUSICBRAINZ_USER_AGENT}
     for attempt in range(max_retries):
@@ -826,7 +881,11 @@ def fetch_http_details():
         else:
             current_track_data["quality"] = "low"
     except Exception as e:
-        print(f"HTTP fetch error: {e}")
+        global _last_http_error_time
+        now = time.time()
+        if now - _last_http_error_time > 10:   # print only every 10 seconds
+            print(f"HTTP fetch error: {e}")
+            _last_http_error_time = now
 
 def maybe_scrobble(previous_track_data, max_position, duration):
     if not previous_track_data or not previous_track_data.get("track"):
