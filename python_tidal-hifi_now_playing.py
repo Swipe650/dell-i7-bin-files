@@ -33,28 +33,6 @@ from flask_socketio import SocketIO
 import io
 import fcntl
 
-import builtins
-import functools
-
-# Throttle identical print messages to once every 10 seconds
-_original_print = builtins.print
-_print_last = {}
-_PRINT_THROTTLE_SEC = 10
-
-@functools.wraps(_original_print)
-def throttled_print(*args, **kwargs):
-    msg = " ".join(str(a) for a in args)
-    # Only throttle if there are no keyword arguments (normal print)
-    if kwargs:
-        return _original_print(*args, **kwargs)
-    now = time.time()
-    last = _print_last.get(msg, 0)
-    if now - last > _PRINT_THROTTLE_SEC:
-        _print_last[msg] = now
-        _original_print(*args, **kwargs)
-
-builtins.print = throttled_print
-
 _last_http_error_time = 0
 
 # ------------------------- CONFIGURATION -------------------------
@@ -275,6 +253,7 @@ MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (kerr_avon@live.com)"  # change ema
 MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
 MB_REQUEST_DELAY = 1.1   # seconds between API calls (be polite)
 
+_last_mb_request_time = 0 
 _last_mb_error_time = 0
 
 def _rate_limit():
