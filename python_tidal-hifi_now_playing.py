@@ -1816,6 +1816,19 @@ def api_ignore_artist_no_genre():
     finally:
         conn.close()
 
+@app.route('/api/unignore_artist_no_genre', methods=['POST'])
+def api_unignore_artist_no_genre():
+    data = request.get_json()
+    artist = data.get('artist', '').strip()
+    if not artist:
+        return jsonify({"error": "Missing artist name"}), 400
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("DELETE FROM artist_ignore_genre WHERE artist = ?", (artist,))
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok"})
+
 @app.route('/api/backfill_musicbrainz_genres', methods=['POST'])
 def api_backfill_musicbrainz_genres():
     # Fetch all untagged scrobble artists (distinct, to minimise API calls)
@@ -3747,7 +3760,14 @@ function loadNoGenreArtists() {
             if (data.error) alert('Error: ' + data.error);
             else {
                 alert(`Genre "${genre}" saved for artist "${artist}".`);
-                loadNoGenreArtists(); // refresh list
+                // Remove the artist from the ignore list (if present)
+                fetch('/api/unignore_artist_no_genre', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ artist: artist })
+                }).catch(() => {});
+                // Refresh the “no genre” list and reset the form
+                loadNoGenreArtists();
                 document.getElementById('artistNameInput').value = '';
                 document.getElementById('genreSelectDropdown').value = '';
                 refreshGenreDatalists();
