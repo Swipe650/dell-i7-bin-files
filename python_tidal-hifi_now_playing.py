@@ -3050,7 +3050,7 @@ MONTHLY_TEMPLATE = """
         .table-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
         .stat-list { list-style: none; padding: 0 5px 0 0; margin: 0; max-height: 300px; overflow-y: auto; }
         .stat-list li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
-        .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
+        .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden !important; ; text-overflow: ellipsis; padding-right: 1rem; }
         .stat-count { font-weight: 600; color: var(--accent); margin-left: auto; flex-shrink: 0; }
         .stat-list::-webkit-scrollbar { width: 6px; }
         .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
@@ -3804,6 +3804,29 @@ MONTHLY_TEMPLATE = """
     loadPlaylistDropdown();
     populateGenreDropdown();
     loadNoGenreArtists();
+
+// Click-to-enable scrolling for all scrollable lists on the monthly page
+document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
+    list.style.overflow = 'hidden';   // ensure initial state
+    list.addEventListener('click', function(e) {
+        // Toggle scrolling
+        if (list.style.overflowY === 'auto' || list.style.overflowY === 'scroll') {
+            list.style.overflow = 'hidden';
+        } else {
+            list.style.overflowY = 'auto';
+        }
+        e.stopPropagation();
+    });
+});
+
+// Clicking outside any list locks scrolling again
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
+        if (!list.contains(e.target)) {
+            list.style.overflow = 'hidden';
+        }
+    });
+});
 </script>
 </body>
 </html>
