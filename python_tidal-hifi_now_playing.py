@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import eventlet
-
 import logging
+import logging
+
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # Patch logging's internal weakref callback to ignore greenlet finalization
 _original_removeHandlerRef = logging._removeHandlerRef
