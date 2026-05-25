@@ -2044,14 +2044,24 @@ HTML_TEMPLATE = """
             <img id="art" class="art" src="" />
             <div class="info">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button id="favBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add to favourites">🤍</button>
+                    <div style="width:1.5em; display:flex; justify-content:center; flex-shrink:0;">
+                        <button id="favBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add to favourites">🤍</button>
+                    </div>
                     <div id="track" class="track"></div>
                 </div>
-                <div id="artist" class="artist"></div>
+
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <button id="favAlbumBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add album to favourites">☆</button>
+                    <div style="width:1.5em; flex-shrink:0;"></div>
+                    <div id="artist" class="artist"></div>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:1.5em; display:flex; justify-content:center; flex-shrink:0;">
+                        <button id="favAlbumBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add album to favourites">☆</button>
+                    </div>
                     <div id="album" class="album"></div>
-                </div>                
+                </div>
+
                 <div id="lastScrobbled" class="last-scrobbled"></div>
                 <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
