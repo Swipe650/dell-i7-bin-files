@@ -110,6 +110,19 @@ def migrate_favourites_db():
     conn.commit()
     conn.close()
 
+def migrate_favourite_albums_db():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS favourite_albums (
+        artist TEXT NOT NULL,
+        album TEXT NOT NULL,
+        art_url TEXT,
+        added_at INTEGER NOT NULL,
+        PRIMARY KEY (artist, album)
+    )''')
+    conn.commit()
+    conn.close()
+
 def migrate_artist_ignore_genre():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
@@ -516,6 +529,7 @@ def init_db():
     migrate_favourites_db()
     migrate_artist_ignore_genre()
     migrate_mb_blacklist_db()
+    migrate_favourite_albums_db()
 
 def migrate_indexes():
     conn = sqlite3.connect(DATABASE)
@@ -1041,6 +1055,19 @@ def api_favourite_check():
     conn.close()
     return jsonify({"favourite": row is not None})
 
+@app.route('/api/favourite_album/check')
+def api_favourite_album_check():
+    artist = request.args.get('artist', '')
+    album = request.args.get('album', '')
+    if not artist or not album:
+        return jsonify({"favourite": False})
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM favourite_albums WHERE artist=? AND album=?", (artist, album))
+    row = c.fetchone()
+    conn.close()
+    return jsonify({"favourite": row is not None})
+
 @app.route('/api/favourite/toggle', methods=['POST'])
 def api_favourite_toggle():
     data = request.get_json()
@@ -1067,6 +1094,31 @@ def api_favourite_toggle():
         conn.close()
         return jsonify({"status": "added"})
 
+@app.route('/api/favourite_album/toggle', methods=['POST'])
+def api_favourite_album_toggle():
+    data = request.get_json()
+    artist = data.get('artist')
+    album = data.get('album')
+    art_url = data.get('art_url', '')
+    if not artist or not album:
+        return jsonify({"error": "Missing artist or album"}), 400
+
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM favourite_albums WHERE artist=? AND album=?", (artist, album))
+    exists = c.fetchone()
+    if exists:
+        c.execute("DELETE FROM favourite_albums WHERE artist=? AND album=?", (artist, album))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "removed"})
+    else:
+        c.execute("INSERT INTO favourite_albums (artist, album, art_url, added_at) VALUES (?,?,?,?)",
+                  (artist, album, art_url, int(time.time())))
+        conn.commit()
+        conn.close()
+        return jsonify({"status": "added"})
+
 @app.route('/api/favourites')
 def api_favourites():
     limit = request.args.get('limit', 50, type=int)
@@ -1075,6 +1127,18 @@ def api_favourites():
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM favourites ORDER BY added_at DESC LIMIT ? OFFSET ?", (limit, offset))
+    rows = c.fetchall()
+    conn.close()
+    return jsonify([dict(row) for row in rows])
+
+@app.route('/api/favourite_albums')
+def api_favourite_albums():
+    limit = request.args.get('limit', 50, type=int)
+    offset = request.args.get('offset', 0, type=int)
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM favourite_albums ORDER BY added_at DESC LIMIT ? OFFSET ?", (limit, offset))
     rows = c.fetchall()
     conn.close()
     return jsonify([dict(row) for row in rows])
@@ -1984,7 +2048,10 @@ HTML_TEMPLATE = """
                     <div id="track" class="track"></div>
                 </div>
                 <div id="artist" class="artist"></div>
-                <div id="album" class="album"></div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <button id="favAlbumBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add album to favourites">☆</button>
+                    <div id="album" class="album"></div>
+                </div>                
                 <div id="lastScrobbled" class="last-scrobbled"></div>
                 <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
@@ -2219,6 +2286,7 @@ function updateUI(data) {
     checkFavourite(data.artist, data.track);
     document.getElementById('artist').innerText = data.artist;
     document.getElementById('album').innerText = data.album;
+    checkFavouriteAlbum(data.artist, data.album);
     document.getElementById('playingFrom').innerHTML = data.playing_from;
     document.getElementById('current').innerText = data.current;
     document.getElementById('duration').innerText = data.duration;
@@ -2294,6 +2362,47 @@ document.getElementById('favBtn').addEventListener('click', () => {
     })
     .catch(e => console.error(e));
 });
+
+document.getElementById('favAlbumBtn').addEventListener('click', () => {
+    if (!currentArtist || !currentAlbum) return;
+    const art = document.getElementById('art').src || '';
+    fetch('/api/favourite_album/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ artist: currentArtist, album: currentAlbum, art_url: art })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'added') {
+            isFavouriteAlbum = true;
+        } else if (data.status === 'removed') {
+            isFavouriteAlbum = false;
+        }
+        updateFavAlbumButton();
+    })
+    .catch(e => console.error(e));
+});
+
+let isFavouriteAlbum = false;
+
+function updateFavAlbumButton() {
+    const btn = document.getElementById('favAlbumBtn');
+    btn.innerHTML = isFavouriteAlbum ? '⭐' : '☆';
+    btn.title = isFavouriteAlbum ? 'Remove album from favourites' : 'Add album to favourites';
+}
+
+function checkFavouriteAlbum(artist, album) {
+    if (!artist || !album) return;
+    fetch(`/api/favourite_album/check?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`)
+        .then(r => r.json())
+        .then(data => {
+            isFavouriteAlbum = data.favourite;
+            updateFavAlbumButton();
+        })
+        .catch(() => {});
+}
+
+// Call it inside updateUI(), after the album text is set
 
 // Inside updateUI(), after the line that sets track title:
 // checkFavourite(data.artist, data.track);
@@ -2679,7 +2788,13 @@ SCROBBLES_TEMPLATE = """
             <canvas id="genrePieChart" width="300" height="200"></canvas>
         </div>
         <div class="stat-card">
-            <h3>❤️ Recent Favourites</h3>
+            <h3>⭐ Favourite Albums</h3>
+            <ul class="stat-list" id="favouriteAlbumsList">
+                <li>Loading...</li>
+            </ul>
+        </div>
+        <div class="stat-card">
+            <h3>❤️ Favourite Tracks</h3>
             <ul class="stat-list" id="favouritesList">
                 <li>Loading...</li>
             </ul>
@@ -2869,6 +2984,28 @@ SCROBBLES_TEMPLATE = """
             })
             .catch(e => console.error('Favourites error:', e));
     }
+
+function fetchFavouriteAlbums() {
+    fetch('/api/favourite_albums?limit=10')
+        .then(r => r.json())
+        .then(data => {
+            const list = document.getElementById('favouriteAlbumsList');
+            if (data.length === 0) {
+                list.innerHTML = '<li>No favourite albums yet</li>';
+                return;
+            }
+            list.innerHTML = data.map(f => `
+                <li>
+                    <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
+                    <span>${escapeHtml(f.artist)} – ${escapeHtml(f.album)}</span>
+                </li>
+            `).join('');
+        })
+        .catch(e => console.error('Favourite albums error:', e));
+}
+
+// Call it along with other fetch functions
+fetchFavouriteAlbums();
 
     // Call it along with other fetch functions
     fetchFavourites();
