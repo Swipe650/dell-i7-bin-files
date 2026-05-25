@@ -3668,8 +3668,7 @@ function loadNoGenreArtists() {
             }
             let html = '<ul class="stat-list" style="max-height: 200px;">';
             artists.forEach(artist => {
-                html += `<li style="cursor:pointer; padding: 4px 0; display: flex; justify-content: space-between; align-items: center;"
-                           onclick="document.getElementById('artistNameInput').value='${escapeHtml(artist)}';">
+                html += `<li class="artist-row" data-artist="${escapeHtml(artist)}" style="cursor:pointer; padding: 4px 0; display: flex; justify-content: space-between; align-items: center;">
                            <span>${escapeHtml(artist)}</span>
                            <button class="ignore-artist-btn" data-artist="${escapeHtml(artist)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Ignore this artist">🚫</button>
                          </li>`;
@@ -3677,10 +3676,17 @@ function loadNoGenreArtists() {
             html += '</ul>';
             container.innerHTML = html;
 
-            // Attach click handlers for ignore buttons
+            // Attach click handlers
+            document.querySelectorAll('.artist-row').forEach(row => {
+                row.addEventListener('click', function(e) {
+                    const artist = this.dataset.artist;
+                    document.getElementById('artistNameInput').value = artist;
+                });
+            });
+
             document.querySelectorAll('.ignore-artist-btn').forEach(btn => {
                 btn.addEventListener('click', function(e) {
-                    e.stopPropagation(); // prevent filling the artist input
+                    e.stopPropagation(); // prevent filling the input
                     const artist = this.dataset.artist;
                     ignoreArtistNoGenre(artist);
                 });
