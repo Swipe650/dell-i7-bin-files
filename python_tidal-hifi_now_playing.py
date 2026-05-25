@@ -117,6 +117,15 @@ def migrate_favourites_db():
     conn.commit()
     conn.close()
 
+def migrate_artist_ignore_genre():
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS artist_ignore_genre (
+        artist TEXT PRIMARY KEY
+    )''')
+    conn.commit()
+    conn.close()
+
 def cleanup_old_backups():
     """Remove oldest backups exceeding MAX_BACKUPS."""
     backups = sorted(glob.glob(os.path.join(BACKUP_DIR, "scrobbles_*.db")))
@@ -448,6 +457,7 @@ def init_db():
     migrate_musicbrainz_cache_db()
     migrate_indexes()
     migrate_favourites_db()
+    migrate_artist_ignore_genre()
 
 def migrate_indexes():
     conn = sqlite3.connect(DATABASE)
@@ -1712,7 +1722,8 @@ def api_artists_without_genre():
     c.execute("""
         SELECT artist, MAX(timestamp) as last_scrobble
         FROM scrobbles
-        WHERE genre IS NULL OR genre = ''
+        WHERE (genre IS NULL OR genre = '')
+          AND artist NOT IN (SELECT artist FROM artist_ignore_genre)
         GROUP BY artist
         ORDER BY last_scrobble DESC
         LIMIT 10
