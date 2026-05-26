@@ -2039,7 +2039,7 @@ HTML_TEMPLATE = """
             <div class="info">
                 <div style="display:flex; align-items:center; gap:8px;">
                     <div style="width:1.8em; display:flex; justify-content:center; flex-shrink:0;">
-                        <button id="favBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add to favourites">🤍</button>
+                        <button id="favBtn" style="background:none; border:none; font-size:1.6em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add to favourites">♡</button>
                     </div>
                     <div id="track" class="track"></div>
                 </div>
@@ -2234,8 +2234,15 @@ let isFavourite = false;
 
 function updateFavButton() {
     const btn = document.getElementById('favBtn');
-    btn.innerHTML = isFavourite ? '❤️' : '🤍';
-    btn.title = isFavourite ? 'Remove from favourites' : 'Add to favourites';
+    if (isFavourite) {
+        btn.innerHTML = '🤍';          // white heart
+        btn.style.fontSize = '1.1em';  // slightly smaller because emoji is larger
+        btn.title = 'Remove from favourites';
+    } else {
+        btn.innerHTML = '♡';           // hollow heart
+        btn.style.fontSize = '1.6em';  // match the star size
+        btn.title = 'Add to favourites';
+    }
 }
 
 function checkFavourite(artist, track) {
