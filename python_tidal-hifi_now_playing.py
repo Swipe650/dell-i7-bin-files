@@ -4248,7 +4248,7 @@ def signal_handler(sig, frame):
             conn.execute("PRAGMA wal_checkpoint(FULL)")
             conn.close()
 
-            print("Syncing to Google Drive...")
+            print("⏳ Syncing to Google Drive...")
 
             # ------------------------------------------------------------
             # SAFETY CHECK: prevent overwriting a newer remote database
@@ -4359,14 +4359,33 @@ if __name__ == '__main__':
         local_max = local_row[0] if local_row and local_row[0] is not None else 0
         local_check_conn.close()
 
+        print("⏳ Checking remote metadata...")
+
         tmp_meta = "/tmp/startup_meta_check.json"
-        subprocess.run(
-            ["rclone", "copyto",
-             f"gdrive-scrobbler:ScrobblerBackup/{SYNC_META_FILE}",
-             tmp_meta],
-            check=True,
-            timeout=10
-        )
+        # Try downloading the metadata file – allow a bit more time and retry once
+        download_ok = False
+        for attempt in range(2):
+            try:
+                subprocess.run(
+                    ["rclone", "copyto",
+                     f"gdrive-scrobbler:ScrobblerBackup/{SYNC_META_FILE}",
+                     tmp_meta],
+                    check=True,
+                    timeout=20
+                )
+                download_ok = True
+                break
+            except subprocess.TimeoutExpired:
+                if attempt == 0:
+                    print("   Retrying metadata download...")
+                else:
+                    raise
+            except Exception:
+                raise
+
+        if not download_ok:
+            raise Exception("Metadata download timed out after retry.")
+
         with open(tmp_meta, "r") as f:
             remote_meta = json.load(f)
         remote_max = remote_meta.get("max_timestamp", 0)
@@ -4376,9 +4395,14 @@ if __name__ == '__main__':
             RESET = "\033[0m"
             print(f"{RED}⚠️  WARNING: The Google Drive backup is NEWER than this local database!{RESET}")
             print(f"{RED}   → Run pull_db.sh FIRST to update this machine, or you may lose scrobbles.{RESET}")
-    except Exception:
-        # If the remote metadata can't be fetched (first sync, no network, etc.), just carry on
-        pass
+        else:
+            print("   ✓ Local database is up‑to‑date.")
+    except Exception as e:
+        # If the remote metadata can't be fetched, warn that the check could not be performed
+        YELLOW = "\033[93m"
+        RESET = "\033[0m"
+        print(f"{YELLOW}⚠️  Could not verify remote metadata: {e}{RESET}")
+        print(f"{YELLOW}   → If you haven't synced recently, run pull_db.sh manually.{RESET}")
     # --- End startup sync check ---
 
     init_db()
