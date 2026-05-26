@@ -1,4 +1,5 @@
 .directory
 exclude
 scrobbles.db
+scrobbler.lock
 /backups
