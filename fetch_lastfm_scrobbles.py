@@ -116,6 +116,10 @@ def main():
 
             for track in tracks:
                 entry = extract_scrobble(track)
+            if entry:
+                if not (args.start <= entry["timestamp"] <= args.end):
+                    continue
+                scrobbles.append(entry)                
                 if entry:
                     scrobbles.append(entry)
 
