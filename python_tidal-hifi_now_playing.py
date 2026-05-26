@@ -37,7 +37,10 @@ _last_http_error_time = 0
 # ------------------------- CONFIGURATION -------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(SCRIPT_DIR, "scrobbles.db")
-SYNC_META_FILE = "scrobbler_sync_meta.json" 
+SYNC_META_FILE = "scrobbler_sync_meta.json"
+
+# Command-line flags
+SKIP_SYNC_ON_EXIT = "--no-sync" in sys.argv
 
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
@@ -4237,8 +4240,13 @@ document.addEventListener('click', function(e) {
 """
 
 # ------------------------- MAIN -------------------------
+
 def signal_handler(sig, frame):
     print("\n👋 Goodbye!")
+
+    if SKIP_SYNC_ON_EXIT:
+        print("🛑 Skipping Google Drive sync (--no-sync flag set).")
+        sys.exit(0)
 
     def _sync_and_exit():
         """Perform WAL checkpoint, check remote timestamp, and sync if safe."""
