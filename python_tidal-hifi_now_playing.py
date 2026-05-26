@@ -838,7 +838,7 @@ def fetch_http_details():
             existing = album_cache.get(cache_key)
             if not existing or (sample_rate > existing.get("sampleRate", 0)):
                 album_cache[cache_key] = audio_quality
-                print(f"Cached quality for {album_name}: {badge_text}")
+                print(f"💿 Cached quality for {album_name}: {badge_text}")
 
         if quality_raw.lower() in ["max", "high"] and album_name and artist_name:
             cache_key = f"{artist_name}|{album_name}".lower()
