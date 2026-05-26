@@ -1100,6 +1100,18 @@ def api_favourites():
     conn.close()
     return jsonify([dict(row) for row in rows])
 
+@app.route('/api/tidal/favorite/toggle', methods=['POST'])
+def tidal_favorite_toggle():
+    try:
+        resp = requests.post(
+            'http://127.0.0.1:47836/player/favorite/toggle',
+            headers={'accept': 'text/plain'},
+            timeout=2
+        )
+        return '', resp.status_code
+    except Exception:
+        return '', 502   # bad gateway – TIDAL probably not running
+
 @app.route('/api/favourite_albums')
 def api_favourite_albums():
     limit = request.args.get('limit', 50, type=int)
@@ -2241,6 +2253,8 @@ document.getElementById('favBtn').addEventListener('click', () => {
     const track = document.getElementById('track').innerText;
     const album = currentAlbum || '';
     const art = document.getElementById('art').src || '';
+
+    // 1. Toggle local database favourite
     fetch('/api/favourite/toggle', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -2253,6 +2267,9 @@ document.getElementById('favBtn').addEventListener('click', () => {
         updateFavButton();
     })
     .catch(e => console.error(e));
+
+    // 2. Toggle favourite in TIDAL desktop app (proxied through backend)
+    fetch('/api/tidal/favorite/toggle', { method: 'POST' }).catch(() => {});
 });
 
 // FAVOURITE ALBUM
