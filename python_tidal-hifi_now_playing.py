@@ -1975,8 +1975,8 @@ HTML_TEMPLATE = """
         .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; transition: background-color 0.2s ease; }
         .btn:hover { background:rgba(255,255,255,0.25); }
         .tag-bar {
-            background: rgba(0,0,0,0.01);
-            backdrop-filter: blur(0px);
+            background: rgba(0,0,0,0.3);
+            backdrop-filter: blur(10px);
             border-radius: 12px;
             padding: 6px 12px;
             display: flex;
@@ -2044,24 +2044,21 @@ HTML_TEMPLATE = """
             <img id="art" class="art" src="" />
             <div class="info">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <div style="width:1.5em; display:flex; justify-content:center; flex-shrink:0;">
+                    <div style="width:1.8em; display:flex; justify-content:center; flex-shrink:0;">
                         <button id="favBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add to favourites">🤍</button>
                     </div>
                     <div id="track" class="track"></div>
                 </div>
-
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <div style="width:1.5em; flex-shrink:0;"></div>
+                    <div style="width:1.8em; flex-shrink:0;"></div>
                     <div id="artist" class="artist"></div>
                 </div>
-
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <div style="width:1.5em; display:flex; justify-content:center; flex-shrink:0;">
-                        <button id="favAlbumBtn" style="background:none; border:none; font-size:1.2em; cursor:pointer; color:#ccc; padding:0; line-height:1;" title="Add album to favourites">☆</button>
+                    <div style="width:1.8em; display:flex; justify-content:center; flex-shrink:0;">
+                        <button id="favAlbumBtn" style="background:none; border:none; font-size:1.6em; cursor:pointer; color:grey; padding:0; line-height:1;" title="Add album to favourites">☆</button>
                     </div>
                     <div id="album" class="album"></div>
                 </div>
-
                 <div id="lastScrobbled" class="last-scrobbled"></div>
                 <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
@@ -2179,7 +2176,6 @@ function fetchCurrentGenre(artist, album, playlist) {
                 genreSpan.innerText = displayGenre;
                 genreSpan.style.display = 'inline-flex';
                 retagBtn.style.display = 'inline-block';
-                // Show ignore button ONLY if the genre came from MusicBrainz
                 if (data.source === 'musicbrainz') {
                     ignoreBtn.style.display = 'inline-block';
                 } else {
@@ -2217,6 +2213,89 @@ function formatRelativeTimeShort(ts) {
     return new Date(ts * 1000).toLocaleDateString();
 }
 
+// FAVOURITE TRACK
+let isFavourite = false;
+
+function updateFavButton() {
+    const btn = document.getElementById('favBtn');
+    btn.innerHTML = isFavourite ? '❤️' : '🤍';
+    btn.title = isFavourite ? 'Remove from favourites' : 'Add to favourites';
+}
+
+function checkFavourite(artist, track) {
+    fetch(`/api/favourite/check?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`)
+        .then(r => r.json())
+        .then(data => {
+            isFavourite = data.favourite;
+            updateFavButton();
+        })
+        .catch(() => {});
+}
+
+document.getElementById('favBtn').addEventListener('click', () => {
+    if (!currentArtist || !document.getElementById('track').innerText) return;
+    const track = document.getElementById('track').innerText;
+    const album = currentAlbum || '';
+    const art = document.getElementById('art').src || '';
+    fetch('/api/favourite/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ artist: currentArtist, track: track, album: album, art_url: art })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'added') isFavourite = true;
+        else if (data.status === 'removed') isFavourite = false;
+        updateFavButton();
+    })
+    .catch(e => console.error(e));
+});
+
+// FAVOURITE ALBUM
+let isFavouriteAlbum = false;
+
+function updateFavAlbumButton() {
+    const btn = document.getElementById('favAlbumBtn');
+    if (isFavouriteAlbum) {
+        btn.innerHTML = '★';          // filled star
+        btn.style.color = '#FFD700';  // gold
+        btn.title = 'Remove album from favourites';
+    } else {
+        btn.innerHTML = '☆';          // hollow star
+        btn.style.color = 'grey';
+        btn.title = 'Add album to favourites';
+    }
+}
+
+function checkFavouriteAlbum(artist, album) {
+    if (!artist || !album) return;
+    fetch(`/api/favourite_album/check?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`)
+        .then(r => r.json())
+        .then(data => {
+            isFavouriteAlbum = data.favourite;
+            updateFavAlbumButton();
+        })
+        .catch(() => {});
+}
+
+document.getElementById('favAlbumBtn').addEventListener('click', () => {
+    if (!currentArtist || !currentAlbum) return;
+    const art = document.getElementById('art').src || '';
+    fetch('/api/favourite_album/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ artist: currentArtist, album: currentAlbum, art_url: art })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'added') isFavouriteAlbum = true;
+        else if (data.status === 'removed') isFavouriteAlbum = false;
+        updateFavAlbumButton();
+    })
+    .catch(e => console.error(e));
+});
+
+// RETAG & IGNORE BUTTONS
 function setupRetagButton() {
     const btn = document.getElementById('mbRetagBtn');
     if (btn) {
@@ -2232,9 +2311,7 @@ function setupRetagButton() {
                     } else {
                         alert('MusicBrainz returned no genres for this artist.');
                     }
-                    // Delete the artist’s cache entry so we fetch fresh tags from MusicBrainz
-                    fetch(`/api/mb_retag_artist/${encodeURIComponent(currentArtist)}`)
-                        .catch(() => {});
+                    fetch(`/api/mb_retag_artist/${encodeURIComponent(currentArtist)}`).catch(() => {});
                     fetchCurrentGenre(currentArtist, currentAlbum, currentPlaylist);
                 })
                 .catch(e => alert('Retag failed: ' + e))
@@ -2243,17 +2320,17 @@ function setupRetagButton() {
                     btn.innerText = '🔄';
                 });
         });
+
         document.getElementById('mbIgnoreBtn').addEventListener('click', () => {
             if (!currentArtist) return;
             const genreText = document.getElementById('currentGenre').innerText.replace('🏷️ ', '').trim();
             if (!genreText) return;
             if (!confirm(`Ignore MusicBrainz tag "${genreText}"?`)) return;
 
-            const btn = document.getElementById('mbIgnoreBtn');
-            btn.disabled = true;
-            btn.innerText = '⏳';
+            const ignoreBtn = document.getElementById('mbIgnoreBtn');
+            ignoreBtn.disabled = true;
+            ignoreBtn.innerText = '⏳';
 
-            // Step 1: add the tag to the blacklist
             fetch('/api/mb_blacklist/add', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2263,29 +2340,26 @@ function setupRetagButton() {
             .then(data => {
                 if (data.status !== 'ok') {
                     alert('Error: ' + (data.error || 'unknown'));
-                    btn.disabled = false;
-                    btn.innerText = '🚫';
+                    ignoreBtn.disabled = false;
+                    ignoreBtn.innerText = '🚫';
                     return;
                 }
-
-                // Step 2: clear the artist's MusicBrainz cache (so next lookup is fresh)
                 return fetch(`/api/mb_retag_artist/${encodeURIComponent(currentArtist)}`);
             })
             .then(r => r && r.json())
             .then(retagData => {
                 if (retagData && retagData.status === 'ok') {
-                    // Step 3: re‑fetch the genre (now filtered with the updated blacklist)
                     fetchCurrentGenre(currentArtist, currentAlbum, currentPlaylist);
                 } else if (retagData) {
                     alert('Cache cleared, but genre re‑fetch may have failed.');
                 }
-                btn.disabled = false;
-                btn.innerText = '🚫';
+                ignoreBtn.disabled = false;
+                ignoreBtn.innerText = '🚫';
             })
             .catch(e => {
                 alert('Request failed: ' + e);
-                btn.disabled = false;
-                btn.innerText = '🚫';
+                ignoreBtn.disabled = false;
+                ignoreBtn.innerText = '🚫';
             });
         });
     }
@@ -2319,7 +2393,6 @@ function updateUI(data) {
     let playlistName = data.playing_from.replace(/^Playing from: /, '');
     fetchCurrentGenre(data.artist, data.album, playlistName);
 
-    // Last scrobbled
     fetch(`/api/last_scrobbled?artist=${encodeURIComponent(data.artist)}&track=${encodeURIComponent(data.track)}`)
         .then(r => r.json())
         .then(res => {
@@ -2333,90 +2406,6 @@ function updateUI(data) {
         .catch(() => {});
 }
 
-let isFavourite = false;
-
-function updateFavButton() {
-    const btn = document.getElementById('favBtn');
-    btn.innerHTML = isFavourite ? '❤️' : '🤍';
-    btn.title = isFavourite ? 'Remove from favourites' : 'Add to favourites';
-}
-
-function checkFavourite(artist, track) {
-    fetch(`/api/favourite/check?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`)
-        .then(r => r.json())
-        .then(data => {
-            isFavourite = data.favourite;
-            updateFavButton();
-        })
-        .catch(() => {});
-}
-
-document.getElementById('favBtn').addEventListener('click', () => {
-    if (!currentArtist || !document.getElementById('track').innerText) return;
-    const track = document.getElementById('track').innerText;
-    const album = currentAlbum || '';
-    const art = document.getElementById('art').src || '';
-    fetch('/api/favourite/toggle', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ artist: currentArtist, track: track, album: album, art_url: art })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'added') {
-            isFavourite = true;
-        } else if (data.status === 'removed') {
-            isFavourite = false;
-        }
-        updateFavButton();
-    })
-    .catch(e => console.error(e));
-});
-
-document.getElementById('favAlbumBtn').addEventListener('click', () => {
-    if (!currentArtist || !currentAlbum) return;
-    const art = document.getElementById('art').src || '';
-    fetch('/api/favourite_album/toggle', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ artist: currentArtist, album: currentAlbum, art_url: art })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'added') {
-            isFavouriteAlbum = true;
-        } else if (data.status === 'removed') {
-            isFavouriteAlbum = false;
-        }
-        updateFavAlbumButton();
-    })
-    .catch(e => console.error(e));
-});
-
-let isFavouriteAlbum = false;
-
-function updateFavAlbumButton() {
-    const btn = document.getElementById('favAlbumBtn');
-    btn.innerHTML = isFavouriteAlbum ? '⭐' : '☆';
-    btn.title = isFavouriteAlbum ? 'Remove album from favourites' : 'Add album to favourites';
-}
-
-function checkFavouriteAlbum(artist, album) {
-    if (!artist || !album) return;
-    fetch(`/api/favourite_album/check?artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}`)
-        .then(r => r.json())
-        .then(data => {
-            isFavouriteAlbum = data.favourite;
-            updateFavAlbumButton();
-        })
-        .catch(() => {});
-}
-
-// Call it inside updateUI(), after the album text is set
-
-// Inside updateUI(), after the line that sets track title:
-// checkFavourite(data.artist, data.track);
-
 socket.on('update', (data) => updateUI(data));
 socket.on('connect', () => console.log('Connected'));
 socket.on('disconnect', () => setTimeout(() => socket.connect(), 1000));
@@ -2428,7 +2417,6 @@ document.getElementById('progress-container').addEventListener('click', (e) => {
     fetch(`/seek/${Math.floor(percent * trackDurationSec)}`, { method: 'PUT' });
 });
 
-// Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     if (e.code === 'Space') { e.preventDefault(); control('playpause'); }
