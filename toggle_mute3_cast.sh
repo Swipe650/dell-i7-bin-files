@@ -40,7 +40,7 @@ get_mute_duration() {
     if [[ $hour -ge 16 && $hour -lt 19 ]] && \
        [ -f "$HOME/.lbc" ] && \
        [[ $dow -ge 1 && $dow -le 5 ]]; then
-        echo 180
+        echo 220
         return
     fi
 
