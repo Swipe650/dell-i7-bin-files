@@ -210,10 +210,10 @@ def get_most_recent_backup():
     return backups[-1] if backups else None
 
 def backup_scheduler():
-    """On startup, backs up only if the last backup is older than 24h, then schedules the next."""
-    backup_count = 0  # initialise counter
+    """On startup, backs up only if the last backup is older than 24h, then schedules every 24h."""
+    backup_count = 0
 
-    # --- Determine when the last backup was made ---
+    # --- Determine the last backup time ---
     most_recent = get_most_recent_backup()
     if most_recent:
         basename = os.path.basename(most_recent)
@@ -226,8 +226,8 @@ def backup_scheduler():
         last_backup_time = None
 
     now = datetime.now()
-    
-    # Decide whether to backup now
+
+    # --- Startup backup (only if older than 24h) ---
     if last_backup_time is None or (now - last_backup_time).total_seconds() >= BACKUP_INTERVAL_HOURS * 3600:
         print("💾 Performing initial backup on startup...")
         backup_database()
@@ -236,51 +236,24 @@ def backup_scheduler():
         if backup_count % 7 == 0:
             vacuum_database()
 
-        # Re‑fetch the most recent backup after creation
-        most_recent = get_most_recent_backup()
-        if most_recent:
-            basename = os.path.basename(most_recent)
-            date_str = basename[len("scrobbles_"):-3]
-            try:
-                last_backup_time = datetime.strptime(date_str, "%Y-%m-%dT%H-%M-%S")
-            except ValueError:
-                last_backup_time = datetime.fromtimestamp(os.path.getmtime(most_recent))
-        else:
-            last_backup_time = now
+        # Set baseline to now (the backup just happened)
+        last_backup_time = datetime.now()
     else:
         hours_since = (now - last_backup_time).total_seconds() / 3600
         print(f"ℹ️ Last backup was {hours_since:.1f} hours ago — skipping startup backup.")
 
-    # --- Loop forever, backing up exactly every 24h from the last backup time ---
+    # --- Main loop ---
     while True:
+        # Always schedule the next backup 24h from the last successful backup
         next_backup_time = last_backup_time + timedelta(hours=BACKUP_INTERVAL_HOURS)
-        now = datetime.now()
-        seconds_until_next = (next_backup_time - now).total_seconds()
+        seconds_until_next = (next_backup_time - datetime.now()).total_seconds()
 
-        if seconds_until_next <= 0:
-            print("⏰ Backup time already due, performing backup now.")
-            backup_database()
-            cleanup_old_backups()
-            backup_count += 1
-            if backup_count % 7 == 0:
-                vacuum_database()
+        if seconds_until_next > 0:
+            print(f"⏳ Next automatic backup at {next_backup_time.strftime('%Y-%m-%d %H:%M:%S')} "
+                  f"(in {seconds_until_next/3600:.1f} hours)")
+            eventlet.sleep(seconds_until_next)
 
-            most_recent = get_most_recent_backup()
-            if most_recent:
-                basename = os.path.basename(most_recent)
-                date_str = basename[len("scrobbles_"):-3]
-                try:
-                    last_backup_time = datetime.strptime(date_str, "%Y-%m-%dT%H-%M-%S")
-                except ValueError:
-                    last_backup_time = datetime.fromtimestamp(os.path.getmtime(most_recent))
-            else:
-                last_backup_time = datetime.now()
-            continue
-
-        print(f"⏳ Next automatic backup at {next_backup_time.strftime('%Y-%m-%d %H:%M:%S')} "
-              f"(in {seconds_until_next/3600:.1f} hours)")
-        eventlet.sleep(seconds_until_next)
-
+        # Perform backup (even if we wake a bit late)
         print("⏰ Performing scheduled backup...")
         backup_database()
         cleanup_old_backups()
@@ -288,16 +261,8 @@ def backup_scheduler():
         if backup_count % 7 == 0:
             vacuum_database()
 
-        most_recent = get_most_recent_backup()
-        if most_recent:
-            basename = os.path.basename(most_recent)
-            date_str = basename[len("scrobbles_"):-3]
-            try:
-                last_backup_time = datetime.strptime(date_str, "%Y-%m-%dT%H-%M-%S")
-            except ValueError:
-                last_backup_time = datetime.fromtimestamp(os.path.getmtime(most_recent))
-        else:
-            last_backup_time = datetime.now()
+        # Advance the baseline to now – this guarantees we never loop instantly
+        last_backup_time = datetime.now()
 
 # ------------------------- MUSICBRAINZ INTEGRATION -------------------------
 import time
