@@ -2976,24 +2976,26 @@ SCROBBLES_TEMPLATE = """
             .catch(e => console.error('Top genres error:', e));
     }
 
-    function fetchFavourites() {
-        fetch('/api/favourites?limit=10')
-            .then(r => r.json())
-            .then(data => {
-                const list = document.getElementById('favouritesList');
-                if (data.length === 0) {
-                    list.innerHTML = '<li>No favourites yet</li>';
-                    return;
-                }
-                list.innerHTML = data.map(f => `
-                    <li>
-                        <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
-                        <span>${escapeHtml(f.artist)} – ${escapeHtml(f.track)}</span>
-                    </li>
-                `).join('');
-            })
-            .catch(e => console.error('Favourites error:', e));
-    }
+function fetchFavourites() {
+    fetch('/api/favourites?limit=10')
+        .then(r => r.json())
+        .then(data => {
+            const list = document.getElementById('favouritesList');
+            if (data.length === 0) {
+                list.innerHTML = '<li>No favourites yet</li>';
+                return;
+            }
+            list.innerHTML = data.map(f => `
+                <li style="display: flex; align-items: center; gap: 8px;">
+                    <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
+                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.artist)} – ${escapeHtml(f.track)}</span>
+                    <button class="delete-fav-btn" data-artist="${escapeHtml(f.artist)}" data-track="${escapeHtml(f.track)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Remove from favourites">❌</button>
+                </li>
+            `).join('');
+            attachFavDeleteHandlers();
+        })
+        .catch(e => console.error('Favourites error:', e));
+}
 
 function fetchFavouriteAlbums() {
     fetch('/api/favourite_albums?limit=10')
@@ -3134,6 +3136,29 @@ function attachFavAlbumDeleteHandlers() {
                 }
             })
             .catch(e => console.error('Error removing favourite album:', e));
+        });
+    });
+}
+
+function attachFavDeleteHandlers() {
+    document.querySelectorAll('.delete-fav-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const artist = this.dataset.artist;
+            const track = this.dataset.track;
+            if (!confirm(`Remove "${artist} – ${track}" from favourites?`)) return;
+            fetch('/api/favourite/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ artist, track })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'removed') {
+                    fetchFavourites();   // refresh the list
+                }
+            })
+            .catch(e => console.error('Error removing favourite:', e));
         });
     });
 }
