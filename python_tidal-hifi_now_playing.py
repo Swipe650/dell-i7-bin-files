@@ -268,7 +268,7 @@ def backup_scheduler():
 import time
 import re
 
-MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (kerr_avon@live.com)"  # change email
+MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (private)"  # change email
 MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
 MB_REQUEST_DELAY = 1.1   # seconds between API calls (be polite)
 
