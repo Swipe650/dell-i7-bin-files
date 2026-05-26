@@ -37,6 +37,7 @@ _last_http_error_time = 0
 # ------------------------- CONFIGURATION -------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(SCRIPT_DIR, "scrobbles.db")
+SYNC_META_FILE = "scrobbler_sync_meta.json" 
 
 BASE_URL = "http://127.0.0.1:47836"
 CURRENT_URL = f"{BASE_URL}/current"
@@ -268,7 +269,7 @@ def backup_scheduler():
 import time
 import re
 
-MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (private)"  # change email
+MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (kerr_avon@live.com)"  # change email
 MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
 MB_REQUEST_DELAY = 1.1   # seconds between API calls (be polite)
 
@@ -4238,10 +4239,103 @@ document.addEventListener('click', function(e) {
 # ------------------------- MAIN -------------------------
 def signal_handler(sig, frame):
     print("\n👋 Goodbye!")
-    sys.exit(0)
+
+    def _sync_and_exit():
+        """Perform WAL checkpoint, check remote timestamp, and sync if safe."""
+        try:
+            # Force WAL checkpoint so all data is in the main database file
+            conn = sqlite3.connect(DATABASE)
+            conn.execute("PRAGMA wal_checkpoint(FULL)")
+            conn.close()
+
+            print("Syncing to Google Drive...")
+
+            # ------------------------------------------------------------
+            # SAFETY CHECK: prevent overwriting a newer remote database
+            # ------------------------------------------------------------
+            local_max = None
+            conn = sqlite3.connect(DATABASE)
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(timestamp) FROM scrobbles")
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                local_max = row[0]
+            conn.close()
+
+            remote_max = None
+            tmp_meta = f"/tmp/{SYNC_META_FILE}"
+            try:
+                subprocess.run(
+                    ["rclone", "copyto",
+                     f"gdrive-scrobbler:ScrobblerBackup/{SYNC_META_FILE}",
+                     tmp_meta],
+                    check=True,
+                    timeout=60
+                )
+                with open(tmp_meta, "r") as f:
+                    meta = json.load(f)
+                remote_max = meta.get("max_timestamp")
+            except Exception:
+                if local_max is not None:
+                    print("   No remote metadata found – assuming first sync.")
+                else:
+                    print("⚠️ Cannot verify remote state; aborting sync to be safe.")
+                    sys.exit(1)
+
+            if remote_max is not None and local_max is not None and local_max < remote_max:
+                print("❌ Local database is OLDER than the Google Drive backup!")
+                print("   → Please run pull_db.sh first to update this machine.")
+                sys.exit(1)
+
+            # ------------------------------------------------------------
+            # UPLOAD DATABASE
+            # ------------------------------------------------------------
+            subprocess.run(
+                ["rclone", "copy", DATABASE, "gdrive-scrobbler:ScrobblerBackup/"],
+                check=True,
+                timeout=300
+            )
+            for suffix in ["-wal", "-shm"]:
+                extra = DATABASE + suffix
+                if os.path.exists(extra):
+                    subprocess.run(
+                        ["rclone", "copy", extra, "gdrive-scrobbler:ScrobblerBackup/"],
+                        check=True,
+                        timeout=300
+                    )
+
+            # ------------------------------------------------------------
+            # UPDATE METADATA FILE
+            # ------------------------------------------------------------
+            if local_max is not None:
+                meta = {
+                    "max_timestamp": local_max,
+                    "host": os.uname().nodename,
+                    "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                local_meta_path = f"/tmp/{SYNC_META_FILE}"
+                with open(local_meta_path, "w") as f:
+                    json.dump(meta, f)
+                subprocess.run(
+                    ["rclone", "copy", local_meta_path, "gdrive-scrobbler:ScrobblerBackup/"],
+                    check=True,
+                    timeout=60
+                )
+
+            print("💾 Database synced to Google Drive.")
+        except subprocess.TimeoutExpired:
+            print("⚠️ Sync timed out – the file may still have been uploaded.")
+        except Exception as e:
+            print(f"⚠️ Failed to sync to Google Drive: {e}")
+        finally:
+            sys.exit(0)
+
+    # Spawn the sync/exit routine as a greenlet – Eventlet will run it immediately
+    eventlet.spawn(_sync_and_exit)
+
 
 if __name__ == '__main__':
-    import fcntl   # move import to top of file or keep here – it's fine
+    import fcntl
 
     # --- Prevent duplicate instances ---
     LOCK_FILE = os.path.join(SCRIPT_DIR, "scrobbler.lock")
@@ -4256,19 +4350,50 @@ if __name__ == '__main__':
     print("🔒 Lock acquired – only one instance running.")
     # --- End duplicate check ---
 
+    # --- Startup sync check: warn if remote database is newer ---
+    try:
+        local_check_conn = sqlite3.connect(DATABASE)
+        cur = local_check_conn.cursor()
+        cur.execute("SELECT MAX(timestamp) FROM scrobbles")
+        local_row = cur.fetchone()
+        local_max = local_row[0] if local_row and local_row[0] is not None else 0
+        local_check_conn.close()
+
+        tmp_meta = "/tmp/startup_meta_check.json"
+        subprocess.run(
+            ["rclone", "copyto",
+             f"gdrive-scrobbler:ScrobblerBackup/{SYNC_META_FILE}",
+             tmp_meta],
+            check=True,
+            timeout=10
+        )
+        with open(tmp_meta, "r") as f:
+            remote_meta = json.load(f)
+        remote_max = remote_meta.get("max_timestamp", 0)
+
+        if remote_max > local_max:
+            RED = "\033[91m"
+            RESET = "\033[0m"
+            print(f"{RED}⚠️  WARNING: The Google Drive backup is NEWER than this local database!{RESET}")
+            print(f"{RED}   → Run pull_db.sh FIRST to update this machine, or you may lose scrobbles.{RESET}")
+    except Exception:
+        # If the remote metadata can't be fetched (first sync, no network, etc.), just carry on
+        pass
+    # --- End startup sync check ---
+
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
     poller_thread.start()
-    
+
     # Start the backup scheduler as a cooperative greenlet
     eventlet.spawn(backup_scheduler)
-    
+
     print(f"✅ TIDAL HIFI FULL SCROBBLER (with genre tagging)")
     print(f"📀 Database: {DATABASE}")
     print("🌐 Player: http://127.0.0.1:5000")
     print("📊 Overview: http://127.0.0.1:5000/scrobbles")
     print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
-    
+
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     socketio.run(app, host='0.0.0.0', port=5000, debug=False)
