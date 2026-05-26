@@ -2837,14 +2837,22 @@ SCROBBLES_TEMPLATE = """
         }).catch(e => console.error('Now playing error:', e));
     }
 
-    function fetchListeningTime() {
-        fetch('/api/listening_time').then(r => r.json()).then(data => {
-            document.getElementById('timeToday').innerText = data.today + 'h';
-            document.getElementById('timeWeek').innerText = data.week + 'h';
-            document.getElementById('timeMonth').innerText = data.month + 'h';
-            document.getElementById('timeYear').innerText = data.year + 'h';
-        }).catch(e => console.error('Listening time error:', e));
-    }
+function fetchListeningTime() {
+    fetch('/api/listening_time').then(r => r.json()).then(data => {
+        document.getElementById('timeToday').innerText = data.today + 'h';
+        document.getElementById('timeWeek').innerText = data.week + 'h';
+        document.getElementById('timeMonth').innerText = data.month + 'h';
+        // Convert year to days + hours if it exceeds 24 hours
+        const yearHours = data.year;
+        if (yearHours >= 24) {
+            const days = Math.floor(yearHours / 24);
+            const remainingHours = (yearHours % 24).toFixed(1);
+            document.getElementById('timeYear').innerText = `${days}d ${remainingHours}h`;
+        } else {
+            document.getElementById('timeYear').innerText = yearHours + 'h';
+        }
+    }).catch(e => console.error('Listening time error:', e));
+}
 
     function fetchStats() {
         fetch('/api/stats').then(r => r.json()).then(data => {
