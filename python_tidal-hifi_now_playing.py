@@ -1529,6 +1529,19 @@ def api_search_scrobbles():
     conn.close()
     return jsonify([dict(row) for row in rows])
 
+@app.route('/api/track_playcount')
+def api_track_playcount():
+    artist = request.args.get('artist', '')
+    track = request.args.get('track', '')
+    if not artist or not track:
+        return jsonify({"count": 0})
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM scrobbles WHERE artist=? AND track=?", (artist, track))
+    count = c.fetchone()[0]
+    conn.close()
+    return jsonify({"count": count})
+
 @app.route('/export')
 def export_data():
     data = export_scrobbles_to_json()
@@ -1966,7 +1979,7 @@ HTML_TEMPLATE = """
         .track { font-size:2em; word-break:break-word; }
         .artist { color:#ccc; }
         .album { color:#999; margin-bottom:4px; }
-        .last-scrobbled { font-size:0.85em; color:#aaa; margin-bottom:16px; }
+        .stats-line { font-size:0.85em; color:#aaa; }
         .playing-from { font-size:0.9em; margin-top:5px; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
         .progress-container { width:100%; height:6px; background:rgba(255,255,255,0.2); border-radius:10px; overflow:hidden; cursor:default; }
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
@@ -2059,7 +2072,13 @@ HTML_TEMPLATE = """
                     </div>
                     <div id="album" class="album"></div>
                 </div>
-                <div id="lastScrobbled" class="last-scrobbled"></div>
+
+                <!-- Last played and play count, tightly stacked -->
+                <div style="margin-bottom:12px; line-height:1.4;">
+                    <div id="lastScrobbled" class="stats-line"></div>
+                    <div id="trackPlayCount" class="stats-line"></div>
+                </div>
+
                 <div id="playingFrom" class="playing-from"></div>
                 <div class="progress-container" id="progress-container">
                     <div id="progress" class="progress"></div>
@@ -2213,6 +2232,22 @@ function formatRelativeTimeShort(ts) {
     return new Date(ts * 1000).toLocaleDateString();
 }
 
+function fetchTrackPlayCount(artist, track) {
+    if (!artist || !track) return;
+    fetch(`/api/track_playcount?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`)
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('trackPlayCount');
+            if (data.count > 0) {
+                const times = data.count === 1 ? 'time' : 'times';
+                el.innerText = `Played ${data.count} ${times}`;
+            } else {
+                el.innerText = '';
+            }
+        })
+        .catch(() => {});
+}
+
 // FAVOURITE TRACK
 let isFavourite = false;
 
@@ -2257,11 +2292,11 @@ let isFavouriteAlbum = false;
 function updateFavAlbumButton() {
     const btn = document.getElementById('favAlbumBtn');
     if (isFavouriteAlbum) {
-        btn.innerHTML = '★';          // filled star
-        btn.style.color = '#FFD700';  // gold
+        btn.innerHTML = '★';
+        btn.style.color = '#FFD700';
         btn.title = 'Remove album from favourites';
     } else {
-        btn.innerHTML = '☆';          // hollow star
+        btn.innerHTML = '☆';
         btn.style.color = 'grey';
         btn.title = 'Add album to favourites';
     }
@@ -2404,6 +2439,8 @@ function updateUI(data) {
             }
         })
         .catch(() => {});
+
+    fetchTrackPlayCount(data.artist, data.track);
 }
 
 socket.on('update', (data) => updateUI(data));
