@@ -2071,7 +2071,7 @@ HTML_TEMPLATE = """
                     <button class="btn" onclick="control('next')">⏭ Next</button>
                 </div>
                 <div class="meta">
-                    <span id="scrobbleCounter" style="margin-right:8px; font-size:0.9em; color:#ccc; font-weight:500;">📀 <span id="totalScrobblesDisplay">...</span></span>
+                    <span id="scrobbleCounter" style="margin-right:8px; font-size:0.9em; color:#ccc; font-weight:500; position: relative; top: 1px;">📀 <span id="totalScrobblesDisplay" style="font-weight:bold;">...</span></span>
                     <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
                         <span id="metaText"></span>
                         <span id="currentGenre" class="genre-badge" style="display: none;"></span>
