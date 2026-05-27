@@ -4652,7 +4652,7 @@ if __name__ == '__main__':
         RESET = "\033[0m"
         print(f"{YELLOW}⚠️  WARNING: You previously ran with the --no-sync flag and new scrobbles were recorded!{RESET}")
         print(f"{YELLOW}   → The local database may contain unsynced changes.{RESET}")
-        print(f"{YELLOW}   → Before switching to another PC, run this command on THIS machine to push the changes:{RESET}")
+        print(f"{YELLOW}   → Before switching to another PC, run this command on the machine that ran with --nosync to push the changes:{RESET}")
         print(f"{YELLOW}     rclone copy {DATABASE} gdrive-scrobbler:ScrobblerBackup/{RESET}")
         print(f"{YELLOW}   → Then delete the flag file: rm {DIRTY_FLAG_FILE}{RESET}")
 
