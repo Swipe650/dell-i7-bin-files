@@ -399,7 +399,7 @@ def get_musicbrainz_genres(artist_name):
 
     genres = _fetch_artist_tags(mbid)
     if not genres:
-        print("   No genres found.")
+        print("✖️ No genres found.")
         _save_mb_cache(artist_lower, "", [])
         return []
 
@@ -408,7 +408,7 @@ def get_musicbrainz_genres(artist_name):
     genres = [g for g in genres if g.lower() not in blacklist]
 
     if genres:
-        print(f" ☑️ Found genres: {', '.join(genres[:5])}")
+        print(f"☑️ Found genres: {', '.join(genres[:5])}")
     else:
         print("   All genres blacklisted or empty.")
 
@@ -4687,9 +4687,9 @@ if __name__ == '__main__':
     if not SKIP_SYNC_ON_EXIT and os.path.exists(DIRTY_FLAG_FILE):
         YELLOW = "\033[93m"
         RESET = "\033[0m"
-        print(f"{YELLOW}⚠️  WARNING: You previously ran with the --no-sync flag and new scrobbles were recorded!{RESET}")
+        print(f"{YELLOW}⚠️  WARNING: You previously ran with --no-sync and new scrobbles were recorded!{RESET}")
         print(f"{YELLOW}   → The local database may contain unsynced changes.{RESET}")
-        print(f"{YELLOW}   → Before switching to another PC, run this command on the machine that ran with --no-sync to push the changes:{RESET}")
+        print(f"{YELLOW}   → Before switching to another PC, run this on the machine that used --no-sync:{RESET}")
         print(f"{YELLOW}     rclone copy {DATABASE} gdrive-scrobbler:ScrobblerBackup/{RESET}")
         print(f"{YELLOW}   → Then delete the flag file: rm {DIRTY_FLAG_FILE}{RESET}")
 
