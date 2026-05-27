@@ -408,7 +408,7 @@ def get_musicbrainz_genres(artist_name):
     genres = [g for g in genres if g.lower() not in blacklist]
 
     if genres:
-        print(f"   Found genres: {', '.join(genres[:5])}")
+        print(f" ☑️ Found genres: {', '.join(genres[:5])}")
     else:
         print("   All genres blacklisted or empty.")
 
