@@ -2540,46 +2540,80 @@ document.getElementById('tagAlbumBtn').addEventListener('click', () => {
 document.getElementById('modalSaveBtn').addEventListener('click', saveGenre);
 document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
 
-// ========== RateYourMusic button (once) ==========
+// ========== SO & RYM buttons ==========
 (function() {
-    function addButton() {
+    function addButtons() {
         const card = document.querySelector('.card');
-        if (!card || document.getElementById('rymButton')) return;
-        const btn = document.createElement('button');
-        btn.id = 'rymButton';
-        btn.innerHTML = '🎵 RYM';
-        btn.title = 'Search on RateYourMusic';
-        Object.assign(btn.style, {
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(4px)',
-            border: 'none',
-            borderRadius: '20px',
-            padding: '4px 10px',
-            fontSize: '0.7rem',
-            cursor: 'pointer',
-            color: 'white',
-            fontFamily: 'inherit',
-            zIndex: '100',
-            transition: 'background 0.2s'
-        });
-        btn.addEventListener('mouseenter', () => btn.style.background = 'rgba(0,0,0,0.7)');
-        btn.addEventListener('mouseleave', () => btn.style.background = 'rgba(0,0,0,0.5)');
-        if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
-        card.appendChild(btn);
-        btn.addEventListener('click', () => {
-            const artist = document.getElementById('artist').innerText;
-            const album = document.getElementById('album').innerText;
-            if (!artist || artist === '-') { alert('No artist playing'); return; }
-            const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
-            window.open(url, '_blank');
-        });
+        if (!card) return;
+
+        // --- SO Button (left of RYM) ---
+        if (!document.getElementById('soButton')) {
+            const soBtn = document.createElement('button');
+            soBtn.id = 'soButton';
+            soBtn.innerHTML = '📀';
+            soBtn.title = 'Open Scrobble Overview';
+            Object.assign(soBtn.style, {
+                position: 'absolute',
+                top: '10px',
+                right: '70px',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(4px)',
+                border: 'none',
+                borderRadius: '20px',
+                padding: '4px 10px',
+                fontSize: '0.7rem',
+                cursor: 'pointer',
+                color: 'white',
+                fontFamily: 'inherit',
+                zIndex: '100',
+                transition: 'background 0.2s'
+            });
+            soBtn.addEventListener('mouseenter', () => soBtn.style.background = 'rgba(0,0,0,0.7)');
+            soBtn.addEventListener('mouseleave', () => soBtn.style.background = 'rgba(0,0,0,0.5)');
+            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+            card.appendChild(soBtn);
+            soBtn.addEventListener('click', () => window.open('/scrobbles', '_blank'));
+        }
+
+        // --- RYM Button (right edge) ---
+        if (!document.getElementById('rymButton')) {
+            const rymBtn = document.createElement('button');
+            rymBtn.id = 'rymButton';
+            rymBtn.innerHTML = '🎵 RYM';
+            rymBtn.title = 'Search on RateYourMusic';
+            Object.assign(rymBtn.style, {
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(4px)',
+                border: 'none',
+                borderRadius: '20px',
+                padding: '4px 10px',
+                fontSize: '0.7rem',
+                cursor: 'pointer',
+                color: 'white',
+                fontFamily: 'inherit',
+                zIndex: '100',
+                transition: 'background 0.2s'
+            });
+            rymBtn.addEventListener('mouseenter', () => rymBtn.style.background = 'rgba(0,0,0,0.7)');
+            rymBtn.addEventListener('mouseleave', () => rymBtn.style.background = 'rgba(0,0,0,0.5)');
+            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+            card.appendChild(rymBtn);
+            rymBtn.addEventListener('click', () => {
+                const artist = document.getElementById('artist').innerText;
+                const album = document.getElementById('album').innerText;
+                if (!artist || artist === '-') { alert('No artist playing'); return; }
+                const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
+                window.open(url, '_blank');
+            });
+        }
     }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
-    else addButton();
-    setTimeout(addButton, 1000);
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButtons);
+    else addButtons();
+    setTimeout(addButtons, 1000);
 })();
 
 fetchTotalScrobbles();
