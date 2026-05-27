@@ -3525,7 +3525,7 @@ MONTHLY_TEMPLATE = """
         .table-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
         .stat-list { list-style: none; padding: 0 5px 0 0; margin: 0; max-height: 300px; overflow-y: auto; }
         .stat-list li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
-        .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden !important; ; text-overflow: ellipsis; padding-right: 1rem; }
+        .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 1rem; }
         .stat-count { font-weight: 600; color: var(--accent); margin-left: auto; flex-shrink: 0; }
         .stat-list::-webkit-scrollbar { width: 6px; }
         .stat-list::-webkit-scrollbar-track { background: var(--border-card); border-radius: 3px; }
@@ -3594,21 +3594,51 @@ MONTHLY_TEMPLATE = """
             padding: 0 4px;
         }
         .delete-scrobble:hover { opacity: 1; color: var(--accent); }
-        .empty-message { padding: 2rem; text-align: center; color: var(--text-muted); }
+        .download-scrobble { text-decoration: none; font-size: 1.2rem; margin-left: 4px; opacity: 0.6; color: var(--text-secondary); }
         .download-scrobble:hover { opacity: 1; color: var(--accent); }
+        .empty-message { padding: 2rem; text-align: center; color: var(--text-muted); }
+
+        /* Heatmap styles */
+        .heatmap-grid {
+            display: grid;
+            grid-template-rows: repeat(7, 12px);
+            grid-auto-flow: column;
+            gap: 3px;
+            margin-top: 1rem;
+            max-width: 100%;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+        .heatmap-cell {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            background: #1a1a1a;
+            cursor: default;
+        }
+        .heatmap-month-labels {
+            display: flex;
+            margin-top: 4px;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            gap: 3px;
+        }
+        .heatmap-month-label {
+            width: 12px;
+            text-align: left;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
 <div class="container">
-<div class="header">
-    <div>
-        <h1>📊 Reports and Tools</h1>
-        <div class="sub">playlist rename, genre tagging & monthly reports</div>
-    </div>
-    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+    <div class="header">
+        <div>
+            <h1>📊 Reports and Tools</h1>
+            <div class="sub">playlist rename, genre tagging & monthly reports</div>
+        </div>
         <a href="/scrobbles" class="back-link">◀ Back to Overview</a>
     </div>
-</div>
 
     <div class="month-picker-row">
         <select id="yearSelect"></select>
@@ -3772,9 +3802,6 @@ MONTHLY_TEMPLATE = """
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
 
-    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
-</div>
-
 <script>
     // ========== DARK MODE – APPLY IMMEDIATELY ==========
     (function() {
@@ -3865,96 +3892,123 @@ MONTHLY_TEMPLATE = """
         return new Date(timestamp*1000).toLocaleDateString();
     }
 
-let heatmapView = 'year';   // 'year', 'month', 'week'
-let yearlyDailyCounts = {};
-let heatmapYear = new Date().getFullYear();
+    // ========== HEATMAP ==========
+    let heatmapView = 'year';
+    let yearlyDailyCounts = {};
+    let heatmapYear = new Date().getFullYear();
 
-function loadYearlyHeatmap() {
-    const container = document.getElementById('heatmapContainer');
-    container.innerHTML = '<div class="empty-message">Loading heatmap...</div>';
-
-    fetch('/api/yearly_heatmap')
-        .then(r => r.json())
-        .then(data => {
-            yearlyDailyCounts = data.daily_counts || {};
-            heatmapYear = data.year || new Date().getFullYear();
-            renderHeatmap();
-        })
-        .catch(e => {
-            console.error('Heatmap error:', e);
-            container.innerHTML = '<div class="empty-message">Failed to load heatmap.</div>';
-        });
-}
-
-function renderHeatmap() {
-    const container = document.getElementById('heatmapContainer');
-    const maxCount = Math.max(1, ...Object.values(yearlyDailyCounts));
-
-    // Determine the date range based on current view
-    const today = new Date();
-    let startDate, endDate;
-    if (heatmapView === 'week') {
-        // Current ISO week (Monday to Sunday)
-        const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ...
-        const monday = new Date(today);
-        monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-        const sunday = new Date(monday);
-        sunday.setDate(monday.getDate() + 6);
-        startDate = monday;
-        endDate = sunday;
-    } else if (heatmapView === 'month') {
-        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-        endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-    } else { // year
-        startDate = new Date(heatmapYear, 0, 1);
-        endDate = new Date(heatmapYear, 11, 31);
+    function loadYearlyHeatmap() {
+        const container = document.getElementById('heatmapContainer');
+        container.innerHTML = '<div class="empty-message">Loading heatmap...</div>';
+        fetch('/api/yearly_heatmap')
+            .then(r => r.json())
+            .then(data => {
+                yearlyDailyCounts = data.daily_counts || {};
+                heatmapYear = data.year || new Date().getFullYear();
+                renderHeatmap();
+            })
+            .catch(e => {
+                console.error('Heatmap error:', e);
+                container.innerHTML = '<div class="empty-message">Failed to load heatmap.</div>';
+            });
     }
 
-    let html = '';
-    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split('T')[0];
-        const count = yearlyDailyCounts[dateStr] || 0;
-        const intensity = count / maxCount;
-        const isFuture = d > today;
-
-        let bg;
-        if (isFuture) {
-            bg = '#1a1a1a';
-        } else if (count === 0) {
-            bg = '#1a1a1a';
-        } else if (intensity < 0.25) {
-            bg = '#1b4f3c';
-        } else if (intensity < 0.5) {
-            bg = '#2d8b57';
-        } else if (intensity < 0.75) {
-            bg = '#5dbf7e';
+    function renderHeatmap() {
+        const container = document.getElementById('heatmapContainer');
+        const maxCount = Math.max(1, ...Object.values(yearlyDailyCounts));
+        const today = new Date();
+        let startDate, endDate;
+        if (heatmapView === 'week') {
+            const dayOfWeek = today.getDay();
+            const monday = new Date(today);
+            monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+            startDate = monday;
+            endDate = new Date(monday);
+            endDate.setDate(monday.getDate() + 6);
+        } else if (heatmapView === 'month') {
+            startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+            endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
         } else {
-            bg = '#a3e6b5';
+            startDate = new Date(heatmapYear, 0, 1);
+            endDate = new Date(heatmapYear, 11, 31);
         }
 
-        const title = `${dateStr}: ${count} scrobble${count !== 1 ? 's' : ''}`;
-        html += `<div style="width: 10px; height: 10px; background: ${bg}; border-radius: 2px; cursor: default;" title="${title}"></div>`;
-    }
-    container.innerHTML = html;
-    document.getElementById('heatmapViewLabel').innerText = heatmapView.charAt(0).toUpperCase() + heatmapView.slice(1);
-}
+        const days = [];
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            const dateStr = d.toISOString().split('T')[0];
+            const count = yearlyDailyCounts[dateStr] || 0;
+            days.push({ date: new Date(d), dateStr, count });
+        }
 
-// Toggle button handler
-document.addEventListener('DOMContentLoaded', function() {
-    const toggleBtn = document.getElementById('heatmapToggleBtn');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', function() {
-            if (heatmapView === 'year') {
-                heatmapView = 'month';
-            } else if (heatmapView === 'month') {
-                heatmapView = 'week';
-            } else {
-                heatmapView = 'year';
+        function getDayIndex(date) {
+            const day = date.getDay();
+            return day === 0 ? 6 : day - 1;
+        }
+
+        const gridData = [];
+        const monthLabelOffsets = [];
+        const firstDate = days[0].date;
+        const firstMonday = new Date(firstDate);
+        firstMonday.setDate(firstDate.getDate() - getDayIndex(firstDate));
+
+        let currentWeekStart = new Date(firstMonday);
+        const lastDate = days[days.length - 1].date;
+
+        while (currentWeekStart <= lastDate) {
+            const week = [];
+            for (let i = 0; i < 7; i++) {
+                const d = new Date(currentWeekStart);
+                d.setDate(currentWeekStart.getDate() + i);
+                const dateStr = d.toISOString().split('T')[0];
+                const dayData = days.find(dd => dd.dateStr === dateStr);
+                week.push(dayData || { date: new Date(d), dateStr, count: 0, future: d > today });
             }
-            renderHeatmap();
-        });
+            gridData.push(week);
+
+            if (currentWeekStart.getDate() <= 7) {
+                const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                monthLabelOffsets.push({ col: gridData.length - 1, label: monthNames[currentWeekStart.getMonth()] });
+            }
+
+            currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+        }
+
+        let html = '<div class="heatmap-grid">';
+        for (let col = 0; col < gridData.length; col++) {
+            const week = gridData[col];
+            for (let row = 0; row < 7; row++) {
+                const day = week[row];
+                if (day.future) {
+                    html += '<div class="heatmap-cell" style="background:#1a1a1a;"></div>';
+                } else {
+                    const intensity = day.count / maxCount;
+                    let bg = '#1a1a1a';
+                    if (day.count > 0) {
+                        if (intensity < 0.25) bg = '#1b4f3c';
+                        else if (intensity < 0.5) bg = '#2d8b57';
+                        else if (intensity < 0.75) bg = '#5dbf7e';
+                        else bg = '#a3e6b5';
+                    }
+                    const title = `${day.dateStr}: ${day.count} scrobble${day.count !== 1 ? 's' : ''}`;
+                    html += `<div class="heatmap-cell" style="background:${bg};" title="${title}"></div>`;
+                }
+            }
+        }
+        html += '</div>';
+
+        html += '<div class="heatmap-month-labels">';
+        let lastLabelCol = -1;
+        for (const label of monthLabelOffsets) {
+            if (label.col !== lastLabelCol) {
+                html += `<div class="heatmap-month-label" style="margin-left: ${label.col * 15}px;">${label.label}</div>`;
+                lastLabelCol = label.col;
+            }
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
+        document.getElementById('heatmapViewLabel').innerText = heatmapView.charAt(0).toUpperCase() + heatmapView.slice(1);
     }
-});
 
     // ========== PLAYLIST RENAME & GENRE MAPPINGS ==========
     function loadPlaylists() {
@@ -4096,47 +4150,47 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(err => alert('Request failed: ' + err.message));
     }
 
-function loadNoGenreArtists() {
-    const container = document.getElementById('noGenreArtistsList');
-    container.innerHTML = '<div class="empty-message">Loading...</div>';
-    fetch('/api/artists_without_genre')
-        .then(r => r.json())
-        .then(artists => {
-            if (artists.length === 0) {
-                container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
-                return;
-            }
-            let html = '<ul class="stat-list" style="max-height: 200px;">';
-            artists.forEach(artist => {
-                html += `<li class="artist-row" data-artist="${escapeHtml(artist)}" style="cursor:pointer; padding: 4px 0; display: flex; justify-content: space-between; align-items: center;">
-                           <span>${escapeHtml(artist)}</span>
-                           <button class="ignore-artist-btn" data-artist="${escapeHtml(artist)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Ignore this artist">🚫</button>
-                         </li>`;
-            });
-            html += '</ul>';
-            container.innerHTML = html;
-
-            // Attach click handlers
-            document.querySelectorAll('.artist-row').forEach(row => {
-                row.addEventListener('click', function(e) {
-                    const artist = this.dataset.artist;
-                    document.getElementById('artistNameInput').value = artist;
+    // ========== TAG ARTIST VIA GENRE DROPDOWN ==========
+    function loadNoGenreArtists() {
+        const container = document.getElementById('noGenreArtistsList');
+        container.innerHTML = '<div class="empty-message">Loading...</div>';
+        fetch('/api/artists_without_genre')
+            .then(r => r.json())
+            .then(artists => {
+                if (artists.length === 0) {
+                    container.innerHTML = '<div class="empty-message">No artists without genre.</div>';
+                    return;
+                }
+                let html = '<ul class="stat-list" style="max-height: 200px;">';
+                artists.forEach(artist => {
+                    html += `<li class="artist-row" data-artist="${escapeHtml(artist)}" style="cursor:pointer; padding: 4px 0; display: flex; justify-content: space-between; align-items: center;">
+                               <span>${escapeHtml(artist)}</span>
+                               <button class="ignore-artist-btn" data-artist="${escapeHtml(artist)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Ignore this artist">🚫</button>
+                             </li>`;
                 });
-            });
+                html += '</ul>';
+                container.innerHTML = html;
 
-            document.querySelectorAll('.ignore-artist-btn').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation(); // prevent filling the input
-                    const artist = this.dataset.artist;
-                    ignoreArtistNoGenre(artist);
+                document.querySelectorAll('.artist-row').forEach(row => {
+                    row.addEventListener('click', function(e) {
+                        const artist = this.dataset.artist;
+                        document.getElementById('artistNameInput').value = artist;
+                    });
                 });
+
+                document.querySelectorAll('.ignore-artist-btn').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const artist = this.dataset.artist;
+                        ignoreArtistNoGenre(artist);
+                    });
+                });
+            })
+            .catch(e => {
+                console.error(e);
+                container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
             });
-        })
-        .catch(e => {
-            console.error(e);
-            container.innerHTML = '<div class="empty-message">Error loading artists.</div>';
-        });
-}
+    }
 
     function ignoreArtistNoGenre(artist) {
         fetch('/api/ignore_artist_no_genre', {
@@ -4147,7 +4201,6 @@ function loadNoGenreArtists() {
         .then(r => r.json())
         .then(data => {
             if (data.status === 'ok') {
-                // Reload the list – the ignored artist will be gone
                 loadNoGenreArtists();
             } else {
                 alert('Error: ' + (data.error || 'unknown'));
@@ -4187,13 +4240,12 @@ function loadNoGenreArtists() {
             if (data.error) alert('Error: ' + data.error);
             else {
                 alert(`Genre "${genre}" saved for artist "${artist}".`);
-                // Remove the artist from the ignore list (if present)
+                // Remove from ignore list automatically
                 fetch('/api/unignore_artist_no_genre', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ artist: artist })
                 }).catch(() => {});
-                // Refresh the “no genre” list and reset the form
                 loadNoGenreArtists();
                 document.getElementById('artistNameInput').value = '';
                 document.getElementById('genreSelectDropdown').value = '';
@@ -4361,7 +4413,7 @@ function loadNoGenreArtists() {
                     </div>
                     <div class="scrobble-date">${dateStr}</div>
                     <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
-                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON" style="text-decoration:none; font-size:1.2rem; margin-left:4px; opacity:0.6; color:var(--text-secondary);">⬇️</a>
+                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON">⬇️</a>
                 </div>`;
             });
             html += '</div>';
@@ -4420,14 +4472,22 @@ function loadNoGenreArtists() {
     document.getElementById('clearSearchBtn').addEventListener('click', clearSearch);
     document.getElementById('saveArtistGenreDropdown').addEventListener('click', saveArtistFromDropdown);
     document.getElementById('clearArtistDropdownBtn').addEventListener('click', clearArtistDropdown);
-    
+
     document.getElementById('backfillMBGenresBtn').addEventListener('click', () => {
         if (!confirm("Update all scrobbles without a manual genre using MusicBrainz suggestions? This may take a while.")) return;
         fetch('/api/backfill_musicbrainz_genres', { method: 'POST' })
             .then(r => r.json())
             .then(data => alert(`MusicBrainz backfill complete. ${data.updated} scrobbles updated.`))
             .catch(e => alert('Error: ' + e));
-    });    
+    });
+
+    // Heatmap toggle
+    document.getElementById('heatmapToggleBtn').addEventListener('click', function() {
+        if (heatmapView === 'year') heatmapView = 'month';
+        else if (heatmapView === 'month') heatmapView = 'week';
+        else heatmapView = 'year';
+        renderHeatmap();
+    });
 
     // Initialise everything
     populateDateSelects();
@@ -4441,29 +4501,6 @@ function loadNoGenreArtists() {
     populateGenreDropdown();
     loadNoGenreArtists();
     loadYearlyHeatmap();
-
-// Click-to-enable scrolling for all scrollable lists on the monthly page
-document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
-    list.style.overflow = 'hidden';   // ensure initial state
-    list.addEventListener('click', function(e) {
-        // Toggle scrolling
-        if (list.style.overflowY === 'auto' || list.style.overflowY === 'scroll') {
-            list.style.overflow = 'hidden';
-        } else {
-            list.style.overflowY = 'auto';
-        }
-        e.stopPropagation();
-    });
-});
-
-// Clicking outside any list locks scrolling again
-document.addEventListener('click', function(e) {
-    document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
-        if (!list.contains(e.target)) {
-            list.style.overflow = 'hidden';
-        }
-    });
-});
 </script>
 </body>
 </html>
