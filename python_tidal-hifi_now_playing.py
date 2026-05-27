@@ -1331,6 +1331,29 @@ def api_monthly_report():
         "hour_counts": hour_counts
     })
 
+@app.route('/api/yearly_heatmap')
+def api_yearly_heatmap():
+    """Return daily scrobble counts for the current year."""
+    year = datetime.now().year
+    start_ts = int(datetime(year, 1, 1).timestamp())
+    end_ts = int(datetime(year + 1, 1, 1).timestamp())
+
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT DATE(datetime(timestamp, 'unixepoch')) as day, COUNT(*) as count
+        FROM scrobbles
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY day
+        ORDER BY day
+    """, (start_ts, end_ts))
+    rows = c.fetchall()
+    conn.close()
+
+    # Convert to a dict: { "2026-01-01": 5, "2026-01-02": 12, ... }
+    result = {row[0]: row[1] for row in rows}
+    return jsonify({"year": year, "daily_counts": result})
+
 @app.route('/api/genre_list')
 def api_genre_list():
     conn = sqlite3.connect(DATABASE)
@@ -3583,6 +3606,21 @@ MONTHLY_TEMPLATE = """
             <canvas id="clockChart" width="100%" height="250"></canvas>
         </div>
     </div>
+            <div class="table-card" style="margin-top: 1.5rem;">
+            <h3>📅 Listening Activity Heatmap</h3>
+            <div id="heatmapContainer" style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1rem; max-width: 100%;">
+                <div class="empty-message">Select a month and generate a report first.</div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.7rem; color: var(--text-muted);">
+                <span>Less</span>
+                <div style="width: 10px; height: 10px; background: #1a1a1a; border-radius: 2px;"></div>
+                <div style="width: 10px; height: 10px; background: #1b4f3c; border-radius: 2px;"></div>
+                <div style="width: 10px; height: 10px; background: #2d8b57; border-radius: 2px;"></div>
+                <div style="width: 10px; height: 10px; background: #5dbf7e; border-radius: 2px;"></div>
+                <div style="width: 10px; height: 10px; background: #a3e6b5; border-radius: 2px;"></div>
+                <span>More</span>
+            </div>
+        </div>
 
     <div id="loadingMsg" style="text-align: center; padding: 2rem;">Select a month and click Generate Report.</div>
 
@@ -3790,6 +3828,56 @@ MONTHLY_TEMPLATE = """
         if(days<7) return `${days} day${days===1?'':'s'} ago`;
         return new Date(timestamp*1000).toLocaleDateString();
     }
+
+function loadYearlyHeatmap() {
+    const container = document.getElementById('heatmapContainer');
+    container.innerHTML = '<div class="empty-message">Loading heatmap...</div>';
+
+    fetch('/api/yearly_heatmap')
+        .then(r => r.json())
+        .then(data => {
+            const dailyCounts = data.daily_counts || {};
+            const year = data.year;
+            const maxCount = Math.max(1, ...Object.values(dailyCounts));
+
+            // Generate all days of the current year
+            const startDate = new Date(year, 0, 1);
+            const endDate = new Date(year, 11, 31);
+            const today = new Date();
+
+            let html = '';
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
+                const count = dailyCounts[dateStr] || 0;
+                const intensity = count / maxCount;
+                const isFuture = d > today;
+
+                // Colour scale: light grey (future) -> green shades (past)
+                let bg;
+                if (isFuture) {
+                    bg = '#1a1a1a';
+                } else if (count === 0) {
+                    bg = '#1a1a1a';
+                } else if (intensity < 0.25) {
+                    bg = '#1b4f3c';
+                } else if (intensity < 0.5) {
+                    bg = '#2d8b57';
+                } else if (intensity < 0.75) {
+                    bg = '#5dbf7e';
+                } else {
+                    bg = '#a3e6b5';
+                }
+
+                const title = `${dateStr}: ${count} scrobble${count !== 1 ? 's' : ''}`;
+                html += `<div style="width: 10px; height: 10px; background: ${bg}; border-radius: 2px; cursor: default;" title="${title}"></div>`;
+            }
+            container.innerHTML = html;
+        })
+        .catch(e => {
+            console.error('Heatmap error:', e);
+            container.innerHTML = '<div class="empty-message">Failed to load heatmap.</div>';
+        });
+}
 
     // ========== PLAYLIST RENAME & GENRE MAPPINGS ==========
     function loadPlaylists() {
@@ -4274,6 +4362,7 @@ function loadNoGenreArtists() {
     loadPlaylistDropdown();
     populateGenreDropdown();
     loadNoGenreArtists();
+    loadYearlyHeatmap();
 
 // Click-to-enable scrolling for all scrollable lists on the monthly page
 document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
