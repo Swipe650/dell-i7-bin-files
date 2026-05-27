@@ -38,6 +38,7 @@ _last_http_error_time = 0
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(SCRIPT_DIR, "scrobbles.db")
 SYNC_META_FILE = "scrobbler_sync_meta.json"
+DIRTY_FLAG_FILE = os.path.join(SCRIPT_DIR, ".scrobbler_dirty")
 
 # Command-line flags
 SKIP_SYNC_ON_EXIT = "--no-sync" in sys.argv
@@ -574,6 +575,10 @@ def migrate_artist_genre_db():
 
 def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
     timestamp = int(time.time())
+        # If we're skipping exit sync, mark that we have unsynced scrobbles
+    if SKIP_SYNC_ON_EXIT and not os.path.exists(DIRTY_FLAG_FILE):
+        with open(DIRTY_FLAG_FILE, "w") as f:
+            f.write(str(timestamp))
     genre = None
 
     # --- Determine genre with priority: Artist > Album > MusicBrainz > Playlist ---
@@ -4389,6 +4394,8 @@ def signal_handler(sig, frame):
                 )
 
             print("💾 Database synced to Google Drive.")
+            if os.path.exists(DIRTY_FLAG_FILE):
+                os.remove(DIRTY_FLAG_FILE)            
         except subprocess.TimeoutExpired:
             print("⚠️ Sync timed out – the file may still have been uploaded.")
         except Exception as e:
@@ -4471,6 +4478,16 @@ if __name__ == '__main__':
     else:
         print("⏭️  Skipping remote metadata check (‑‑no‑sync).")
     # --- End startup sync check ---
+
+    # --- Dirty flag check (unsynced local changes) ---
+    if not SKIP_SYNC_ON_EXIT and os.path.exists(DIRTY_FLAG_FILE):
+        YELLOW = "\033[93m"
+        RESET = "\033[0m"
+        print(f"{YELLOW}⚠️  WARNING: You previously used --no-sync on this PC and new scrobbles were recorded!{RESET}")
+        print(f"{YELLOW}   → The local database may contain unsynced changes.{RESET}")
+        print(f"{YELLOW}   → Before switching to another PC, run this command on THIS machine to push the changes:{RESET}")
+        print(f"{YELLOW}     rclone copy {DATABASE} gdrive-scrobbler:ScrobblerBackup/{RESET}")
+        print(f"{YELLOW}   → Then delete the flag file: rm {DIRTY_FLAG_FILE}{RESET}")
 
     init_db()
     poller_thread = threading.Thread(target=background_poller, daemon=True)
