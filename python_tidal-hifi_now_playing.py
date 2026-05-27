@@ -3606,21 +3606,28 @@ MONTHLY_TEMPLATE = """
             <canvas id="clockChart" width="100%" height="250"></canvas>
         </div>
     </div>
-            <div class="table-card" style="margin-top: 1.5rem;">
-            <h3>📅 Listening Activity Heatmap</h3>
-            <div id="heatmapContainer" style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1rem; max-width: 100%;">
-                <div class="empty-message">Select a month and generate a report first.</div>
-            </div>
-            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.7rem; color: var(--text-muted);">
-                <span>Less</span>
-                <div style="width: 10px; height: 10px; background: #1a1a1a; border-radius: 2px;"></div>
-                <div style="width: 10px; height: 10px; background: #1b4f3c; border-radius: 2px;"></div>
-                <div style="width: 10px; height: 10px; background: #2d8b57; border-radius: 2px;"></div>
-                <div style="width: 10px; height: 10px; background: #5dbf7e; border-radius: 2px;"></div>
-                <div style="width: 10px; height: 10px; background: #a3e6b5; border-radius: 2px;"></div>
-                <span>More</span>
-            </div>
+
+    <!-- ========== HEATMAP CARD ========== -->
+    <div class="table-card" style="margin-top: 1.5rem;">
+        <h3 style="display: flex; justify-content: space-between; align-items: center;">
+            📅 Listening Activity Heatmap
+            <span style="font-size:0.8rem; font-weight:normal;">
+                <span id="heatmapViewLabel">Year</span>
+                <button id="heatmapToggleBtn" style="background: var(--button-bg); border: 1px solid var(--button-border); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size:0.7rem; margin-left:8px;">🔄</button>
+            </span>
+        </h3>
+        <div id="heatmapContainer" style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1rem; max-width: 100%;">
         </div>
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.7rem; color: var(--text-muted);">
+            <span>Less</span>
+            <div style="width: 10px; height: 10px; background: #1a1a1a; border-radius: 2px;"></div>
+            <div style="width: 10px; height: 10px; background: #1b4f3c; border-radius: 2px;"></div>
+            <div style="width: 10px; height: 10px; background: #2d8b57; border-radius: 2px;"></div>
+            <div style="width: 10px; height: 10px; background: #5dbf7e; border-radius: 2px;"></div>
+            <div style="width: 10px; height: 10px; background: #a3e6b5; border-radius: 2px;"></div>
+            <span>More</span>
+        </div>
+    </div>
 
     <div id="loadingMsg" style="text-align: center; padding: 2rem;">Select a month and click Generate Report.</div>
 
@@ -3739,6 +3746,9 @@ MONTHLY_TEMPLATE = """
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
 
+    <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
+</div>
+
 <script>
     // ========== DARK MODE – APPLY IMMEDIATELY ==========
     (function() {
@@ -3829,6 +3839,10 @@ MONTHLY_TEMPLATE = """
         return new Date(timestamp*1000).toLocaleDateString();
     }
 
+let heatmapView = 'year';   // 'year', 'month', 'week'
+let yearlyDailyCounts = {};
+let heatmapYear = new Date().getFullYear();
+
 function loadYearlyHeatmap() {
     const container = document.getElementById('heatmapContainer');
     container.innerHTML = '<div class="empty-message">Loading heatmap...</div>';
@@ -3836,48 +3850,85 @@ function loadYearlyHeatmap() {
     fetch('/api/yearly_heatmap')
         .then(r => r.json())
         .then(data => {
-            const dailyCounts = data.daily_counts || {};
-            const year = data.year;
-            const maxCount = Math.max(1, ...Object.values(dailyCounts));
-
-            // Generate all days of the current year
-            const startDate = new Date(year, 0, 1);
-            const endDate = new Date(year, 11, 31);
-            const today = new Date();
-
-            let html = '';
-            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-                const dateStr = d.toISOString().split('T')[0];
-                const count = dailyCounts[dateStr] || 0;
-                const intensity = count / maxCount;
-                const isFuture = d > today;
-
-                // Colour scale: light grey (future) -> green shades (past)
-                let bg;
-                if (isFuture) {
-                    bg = '#1a1a1a';
-                } else if (count === 0) {
-                    bg = '#1a1a1a';
-                } else if (intensity < 0.25) {
-                    bg = '#1b4f3c';
-                } else if (intensity < 0.5) {
-                    bg = '#2d8b57';
-                } else if (intensity < 0.75) {
-                    bg = '#5dbf7e';
-                } else {
-                    bg = '#a3e6b5';
-                }
-
-                const title = `${dateStr}: ${count} scrobble${count !== 1 ? 's' : ''}`;
-                html += `<div style="width: 10px; height: 10px; background: ${bg}; border-radius: 2px; cursor: default;" title="${title}"></div>`;
-            }
-            container.innerHTML = html;
+            yearlyDailyCounts = data.daily_counts || {};
+            heatmapYear = data.year || new Date().getFullYear();
+            renderHeatmap();
         })
         .catch(e => {
             console.error('Heatmap error:', e);
             container.innerHTML = '<div class="empty-message">Failed to load heatmap.</div>';
         });
 }
+
+function renderHeatmap() {
+    const container = document.getElementById('heatmapContainer');
+    const maxCount = Math.max(1, ...Object.values(yearlyDailyCounts));
+
+    // Determine the date range based on current view
+    const today = new Date();
+    let startDate, endDate;
+    if (heatmapView === 'week') {
+        // Current ISO week (Monday to Sunday)
+        const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ...
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        startDate = monday;
+        endDate = sunday;
+    } else if (heatmapView === 'month') {
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        endDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    } else { // year
+        startDate = new Date(heatmapYear, 0, 1);
+        endDate = new Date(heatmapYear, 11, 31);
+    }
+
+    let html = '';
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        const count = yearlyDailyCounts[dateStr] || 0;
+        const intensity = count / maxCount;
+        const isFuture = d > today;
+
+        let bg;
+        if (isFuture) {
+            bg = '#1a1a1a';
+        } else if (count === 0) {
+            bg = '#1a1a1a';
+        } else if (intensity < 0.25) {
+            bg = '#1b4f3c';
+        } else if (intensity < 0.5) {
+            bg = '#2d8b57';
+        } else if (intensity < 0.75) {
+            bg = '#5dbf7e';
+        } else {
+            bg = '#a3e6b5';
+        }
+
+        const title = `${dateStr}: ${count} scrobble${count !== 1 ? 's' : ''}`;
+        html += `<div style="width: 10px; height: 10px; background: ${bg}; border-radius: 2px; cursor: default;" title="${title}"></div>`;
+    }
+    container.innerHTML = html;
+    document.getElementById('heatmapViewLabel').innerText = heatmapView.charAt(0).toUpperCase() + heatmapView.slice(1);
+}
+
+// Toggle button handler
+document.addEventListener('DOMContentLoaded', function() {
+    const toggleBtn = document.getElementById('heatmapToggleBtn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function() {
+            if (heatmapView === 'year') {
+                heatmapView = 'month';
+            } else if (heatmapView === 'month') {
+                heatmapView = 'week';
+            } else {
+                heatmapView = 'year';
+            }
+            renderHeatmap();
+        });
+    }
+});
 
     // ========== PLAYLIST RENAME & GENRE MAPPINGS ==========
     function loadPlaylists() {
