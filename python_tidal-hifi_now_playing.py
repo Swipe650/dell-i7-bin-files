@@ -850,7 +850,7 @@ def fetch_http_details():
             cached = album_cache.get(cache_key)
             if cached:
                 if last_cached_album != cache_key:
-                    print(f"Using cached quality for {album_name}: {cached.get('badgeText')}")
+                    print(f"💿 Using cached quality for {album_name}: {cached.get('badgeText')}")
                     last_cached_album = cache_key
                 quality_raw = cached.get("quality", quality_raw)
                 badge_text = cached.get("badgeText", badge_text)
