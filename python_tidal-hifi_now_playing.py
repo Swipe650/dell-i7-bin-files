@@ -4572,7 +4572,7 @@ if __name__ == '__main__':
     if not SKIP_SYNC_ON_EXIT and os.path.exists(DIRTY_FLAG_FILE):
         YELLOW = "\033[93m"
         RESET = "\033[0m"
-        print(f"{YELLOW}⚠️  WARNING: You previously used --no-sync on this PC and new scrobbles were recorded!{RESET}")
+        print(f"{YELLOW}⚠️  WARNING: You previously ran with the --no-sync flag and new scrobbles were recorded!{RESET}")
         print(f"{YELLOW}   → The local database may contain unsynced changes.{RESET}")
         print(f"{YELLOW}   → Before switching to another PC, run this command on THIS machine to push the changes:{RESET}")
         print(f"{YELLOW}     rclone copy {DATABASE} gdrive-scrobbler:ScrobblerBackup/{RESET}")
