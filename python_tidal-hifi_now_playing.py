@@ -1409,6 +1409,29 @@ def delete_scrobble(scrobble_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/scrobble/<int:scrobble_id>/export')
+def export_single_scrobble(scrobble_id):
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM scrobbles WHERE id = ?", (scrobble_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"error": "Scrobble not found"}), 404
+
+    scrobble = dict(row)
+    # The import expects a list of scrobbles
+    data = [scrobble]
+    json_str = json.dumps(data, indent=2)
+    filename = f"scrobble_{scrobble_id}.json"
+    return send_file(
+        io.BytesIO(json_str.encode('utf-8')),
+        mimetype='application/json',
+        as_attachment=True,
+        download_name=filename
+    )
+
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
     with session["lock"]:
@@ -2800,6 +2823,7 @@ SCROBBLES_TEMPLATE = """
         .new-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
         .highlight-text { text-align: center; font-size: 1.1rem; margin: 0.5rem 0; }
         #clockPieChart { margin-bottom: 10px; }
+        .download-scrobble:hover { opacity: 1; color: var(--accent); }
     </style>
 </head>
 <body>
@@ -3185,6 +3209,7 @@ fetchFavouriteAlbums();
                     </div>
                     <div class="scrobble-date">${dateStr}</div>
                     <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
+                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON" style="text-decoration:none; font-size:1.2rem; margin-left:4px; opacity:0.6; color:var(--text-secondary);">⬇️</a>
                 </div>
             `;
         }
@@ -3570,6 +3595,7 @@ MONTHLY_TEMPLATE = """
         }
         .delete-scrobble:hover { opacity: 1; color: var(--accent); }
         .empty-message { padding: 2rem; text-align: center; color: var(--text-muted); }
+        .download-scrobble:hover { opacity: 1; color: var(--accent); }
     </style>
 </head>
 <body>
@@ -4335,6 +4361,7 @@ function loadNoGenreArtists() {
                     </div>
                     <div class="scrobble-date">${dateStr}</div>
                     <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
+                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON" style="text-decoration:none; font-size:1.2rem; margin-left:4px; opacity:0.6; color:var(--text-secondary);">⬇️</a>
                 </div>`;
             });
             html += '</div>';
