@@ -1016,6 +1016,30 @@ def api_scrobbles():
     total = count_scrobbles()
     return jsonify({"scrobbles": scrobbles, "total": total})
 
+@app.route('/api/scrobbles/export_selected', methods=['POST'])
+def export_selected_scrobbles():
+    data = request.get_json()
+    ids = data.get('ids', [])
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "No IDs provided"}), 400
+
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    placeholders = ','.join('?' for _ in ids)
+    c.execute(f"SELECT * FROM scrobbles WHERE id IN ({placeholders})", ids)
+    rows = c.fetchall()
+    conn.close()
+
+    export_data = [dict(row) for row in rows]
+    json_str = json.dumps(export_data, indent=2)
+    return send_file(
+        io.BytesIO(json_str.encode('utf-8')),
+        mimetype='application/json',
+        as_attachment=True,
+        download_name='scrobbles_export.json'
+    )
+
 @app.route('/api/favourite/check')
 def api_favourite_check():
     artist = request.args.get('artist', '')
@@ -2670,6 +2694,7 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
 fetchTotalScrobbles();
 setInterval(fetchTotalScrobbles, 60000);
 setupRetagButton();
+
 </script>
 </body>
 </html>
@@ -2747,7 +2772,7 @@ SCROBBLES_TEMPLATE = """
         .player-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
         .report-link { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.4rem 1rem; border-radius: 20px; text-decoration: none; color: var(--accent); font-size: 0.85rem; font-weight: 500; transition: all 0.2s; margin-left: 10px; }
         .report-link:hover { background: var(--accent); color: white; border-color: var(--accent); }
-        .now-playing { background: var(--bg-card); border-radius: 16px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1.5rem; align-items: center; box-shadow: 0 2px 8px var(--shadow); border: 1px solid var(--border-card); }
+        .now-playing { background: var(--bg-card); border-radius: 16px; padding: 1.5rem; margin-bottom: 2rem; display: flex; gap: 1.5rem; align-items: center; box-shadow: 0 2px 8px var(--shadow); border: 1px solid var(--border-card); position: relative; }
         .now-art { width: 80px; height: 80px; border-radius: 12px; object-fit: cover; background: var(--art-bg); }
         .now-info { flex: 1; }
         .now-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--accent); font-weight: 600; }
@@ -2756,7 +2781,7 @@ SCROBBLES_TEMPLATE = """
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
         .stat-card { background: var(--bg-card); border-radius: 16px; padding: 1rem; box-shadow: 0 1px 4px var(--shadow); border: 1px solid var(--border-card); }
         .stat-card h3 { margin: 0 0 1rem 0; font-size: 1.2rem; font-weight: 500; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 0.75rem; }
-        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto;  overflow: hidden; padding-right: 5px; }
+        .stat-list { list-style: none; padding: 0; margin: 0; max-height: 300px; overflow-y: auto; padding-right: 5px; }
         .stat-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-card); }
         .stat-list img { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; background: var(--art-bg); flex-shrink: 0; }
         .stat-list li span:first-child { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2779,12 +2804,8 @@ SCROBBLES_TEMPLATE = """
         .theme-toggle { background: var(--button-bg); border: 1px solid var(--button-border); border-radius: 30px; padding: 0.5rem 1rem; font-size: 0.8rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
         .scrobble-list { background: var(--bg-card); border-radius: 16px; box-shadow: 0 1px 4px var(--shadow); overflow: hidden; border: 1px solid var(--border-card); margin-top: 1rem; }
         .scrobble-item { display: flex; align-items: center; gap: 1rem; padding: 1rem; border-bottom: 1px solid var(--border-card); transition: background 0.15s; }
-        .scrobble-item:hover {
-            background: #f0f0f0 !important;
-        }
-        body.dark .scrobble-item:hover {
-            background: #2a2a2a !important;
-        }
+        .scrobble-item:hover { background: var(--hover-row) !important; }
+        body.dark .scrobble-item:hover { background: #2a2a2a !important; }
         .album-art { flex-shrink: 0; width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--art-bg); box-shadow: 0 1px 2px var(--shadow); }
         .track-info { flex: 1; min-width: 0; }
         .track-name { font-weight: 600; font-size: 1rem; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2801,10 +2822,9 @@ SCROBBLES_TEMPLATE = """
             color: var(--text-secondary);
             padding: 0 4px;
         }
-        .delete-scrobble:hover {
-            opacity: 1;
-            color: var(--accent);
-        }
+        .delete-scrobble:hover { opacity: 1; color: var(--accent); }
+        .download-scrobble { text-decoration: none; font-size: 1.2rem; margin-left: 4px; opacity: 0.6; color: var(--text-secondary); }
+        .download-scrobble:hover { opacity: 1; color: var(--accent); }
         .pagination { display: flex; justify-content: center; gap: 1rem; margin-top: 2rem; align-items: center; }
         .pagination button { background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s; color: var(--text-primary); }
         .pagination button:hover:not(:disabled) { background: var(--button-hover); border-color: var(--text-muted); }
@@ -2823,7 +2843,6 @@ SCROBBLES_TEMPLATE = """
         .new-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
         .highlight-text { text-align: center; font-size: 1.1rem; margin: 0.5rem 0; }
         #clockPieChart { margin-bottom: 10px; }
-        .download-scrobble:hover { opacity: 1; color: var(--accent); }
     </style>
 </head>
 <body>
@@ -2884,9 +2903,7 @@ SCROBBLES_TEMPLATE = """
         </div>
         <div class="stat-card">
             <h3>🏆 Top 10 Listening Days</h3>
-            <ul class="stat-list" id="topDaysList">
-                <li>Loading...</li>
-            </ul>
+            <ul class="stat-list" id="topDaysList"><li>Loading...</li></ul>
         </div>
         <div class="stat-card">
             <h3>📀 Top Playlists</h3>
@@ -2896,22 +2913,17 @@ SCROBBLES_TEMPLATE = """
             <h3>🏷️ Top Genres</h3>
             <ul class="stat-list" id="topGenresList"><li>Loading...</li></ul>
         </div>
-        <!-- New Genre Distribution pie chart -->
         <div class="stat-card">
             <h3>🥧 Genre Distribution</h3>
             <canvas id="genrePieChart" width="300" height="200"></canvas>
         </div>
         <div class="stat-card">
-            <h3>⭐ Favourite Albums</h3>
-            <ul class="stat-list" id="favouriteAlbumsList">
-                <li>Loading...</li>
-            </ul>
+            <h3>🤍 Favourite Tracks</h3>
+            <ul class="stat-list" id="favouritesList"><li>Loading...</li></ul>
         </div>
         <div class="stat-card">
-            <h3>🤍 Favourite Tracks</h3>
-            <ul class="stat-list" id="favouritesList">
-                <li>Loading...</li>
-            </ul>
+            <h3>⭐ Favourite Albums</h3>
+            <ul class="stat-list" id="favouriteAlbumsList"><li>Loading...</li></ul>
         </div>
     </div>
 
@@ -2921,6 +2933,12 @@ SCROBBLES_TEMPLATE = """
             <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(this.files[0])">
         </label>
         <button onclick="location.reload()">🔄 Refresh</button>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+        <button id="selectAllBtn" style="background:var(--button-bg); border:1px solid var(--button-border); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem;">☐ Select All</button>
+        <button id="exportSelectedBtn" style="background:var(--accent); border:none; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem; color:white;">⬇️ Export Selected</button>
+        <span id="selectedCount" style="font-size:0.8rem; color:var(--text-secondary);"></span>
     </div>
 
     <h3 style="margin: 1rem 0 0.5rem 0;">Recent Scrobbles</h3>
@@ -2933,7 +2951,7 @@ SCROBBLES_TEMPLATE = """
 </div>
 
 <script>
-    let genreChart = null;  // for the pie chart
+    let genreChart = null;
 
     function setTheme(theme) {
         if (theme === 'dark') { document.body.classList.add('dark'); } else { document.body.classList.remove('dark'); }
@@ -2953,22 +2971,21 @@ SCROBBLES_TEMPLATE = """
         }).catch(e => console.error('Now playing error:', e));
     }
 
-function fetchListeningTime() {
-    fetch('/api/listening_time').then(r => r.json()).then(data => {
-        document.getElementById('timeToday').innerText = data.today + 'h';
-        document.getElementById('timeWeek').innerText = data.week + 'h';
-        document.getElementById('timeMonth').innerText = data.month + 'h';
-        // Convert year to days + hours if it exceeds 24 hours
-        const yearHours = data.year;
-        if (yearHours >= 24) {
-            const days = Math.floor(yearHours / 24);
-            const remainingHours = (yearHours % 24).toFixed(1);
-            document.getElementById('timeYear').innerText = `${days}d ${remainingHours}h`;
-        } else {
-            document.getElementById('timeYear').innerText = yearHours + 'h';
-        }
-    }).catch(e => console.error('Listening time error:', e));
-}
+    function fetchListeningTime() {
+        fetch('/api/listening_time').then(r => r.json()).then(data => {
+            document.getElementById('timeToday').innerText = data.today + 'h';
+            document.getElementById('timeWeek').innerText = data.week + 'h';
+            document.getElementById('timeMonth').innerText = data.month + 'h';
+            const yearHours = data.year;
+            if (yearHours >= 24) {
+                const days = Math.floor(yearHours / 24);
+                const remainingHours = (yearHours % 24).toFixed(1);
+                document.getElementById('timeYear').innerText = `${days}d ${remainingHours}h`;
+            } else {
+                document.getElementById('timeYear').innerText = yearHours + 'h';
+            }
+        }).catch(e => console.error('Listening time error:', e));
+    }
 
     function fetchStats() {
         fetch('/api/stats').then(r => r.json()).then(data => {
@@ -2981,7 +2998,6 @@ function fetchListeningTime() {
                     <span class="stat-count">${a.playcount}</span>
                 </li>
             `).join('') : '<li>No scrobbles yet</li>';
-            
             const albumsList = document.getElementById('topAlbumsList');
             albumsList.innerHTML = data.top_albums.length ? data.top_albums.map(a => `
                 <li>
@@ -2990,7 +3006,6 @@ function fetchListeningTime() {
                     <span class="stat-count">${a.playcount}</span>
                 </li>
             `).join('') : '<li>No albums yet</li>';
-            
             const tracksList = document.getElementById('topTracksList');
             tracksList.innerHTML = data.top_tracks.length ? data.top_tracks.map(t => `
                 <li>
@@ -3088,55 +3103,6 @@ function fetchListeningTime() {
             .catch(e => console.error('Top genres error:', e));
     }
 
-function fetchFavourites() {
-    fetch('/api/favourites?limit=10')
-        .then(r => r.json())
-        .then(data => {
-            const list = document.getElementById('favouritesList');
-            if (data.length === 0) {
-                list.innerHTML = '<li>No favourites yet</li>';
-                return;
-            }
-            list.innerHTML = data.map(f => `
-                <li style="display: flex; align-items: center; gap: 8px;">
-                    <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
-                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.artist)} – ${escapeHtml(f.track)}</span>
-                    <button class="delete-fav-btn" data-artist="${escapeHtml(f.artist)}" data-track="${escapeHtml(f.track)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Remove from favourites">❌</button>
-                </li>
-            `).join('');
-            attachFavDeleteHandlers();
-        })
-        .catch(e => console.error('Favourites error:', e));
-}
-
-function fetchFavouriteAlbums() {
-    fetch('/api/favourite_albums?limit=10')
-        .then(r => r.json())
-        .then(data => {
-            const list = document.getElementById('favouriteAlbumsList');
-            if (data.length === 0) {
-                list.innerHTML = '<li>No favourite albums yet</li>';
-                return;
-            }
-            list.innerHTML = data.map(f => `
-                <li style="display: flex; align-items: center; gap: 8px;">
-                    <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
-                    <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.artist)} – ${escapeHtml(f.album)}</span>
-                    <button class="delete-fav-album-btn" data-artist="${escapeHtml(f.artist)}" data-album="${escapeHtml(f.album)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Remove from favourites">❌</button>
-                </li>
-            `).join('');
-            attachFavAlbumDeleteHandlers();
-        })
-        .catch(e => console.error('Favourite albums error:', e));
-}
-
-// Call it along with other fetch functions
-fetchFavouriteAlbums();
-
-    // Call it along with other fetch functions
-    fetchFavourites();
-
-    // New function: fetch genre distribution for pie chart
     function fetchGenreDistribution() {
         fetch('/api/top_genres')
             .then(r => r.json())
@@ -3144,11 +3110,9 @@ fetchFavouriteAlbums();
                 const ctx = document.getElementById('genrePieChart').getContext('2d');
                 if (genreChart) genreChart.destroy();
                 if (data.length === 0) {
-                    // Hide chart and show message
                     ctx.canvas.parentElement.innerHTML = '<div class="empty-message">No genre data yet</div>';
                     return;
                 }
-                // Prepare data: top 9, rest as "Other"
                 let topData = data.slice(0, 9);
                 let otherCount = data.slice(9).reduce((sum, g) => sum + g.count, 0);
                 let labels = topData.map(g => g.genre);
@@ -3182,6 +3146,90 @@ fetchFavouriteAlbums();
             .catch(e => console.error('Genre distribution error:', e));
     }
 
+    function fetchFavourites() {
+        fetch('/api/favourites?limit=10')
+            .then(r => r.json())
+            .then(data => {
+                const list = document.getElementById('favouritesList');
+                if (data.length === 0) {
+                    list.innerHTML = '<li>No favourites yet</li>';
+                    return;
+                }
+                list.innerHTML = data.map(f => `
+                    <li style="display: flex; align-items: center; gap: 8px;">
+                        <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
+                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.artist)} – ${escapeHtml(f.track)}</span>
+                        <button class="delete-fav-btn" data-artist="${escapeHtml(f.artist)}" data-track="${escapeHtml(f.track)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Remove from favourites">❌</button>
+                    </li>
+                `).join('');
+                attachFavDeleteHandlers();
+            })
+            .catch(e => console.error('Favourites error:', e));
+    }
+
+    function attachFavDeleteHandlers() {
+        document.querySelectorAll('.delete-fav-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const artist = this.dataset.artist;
+                const track = this.dataset.track;
+                if (!confirm(`Remove "${artist} – ${track}" from favourites?`)) return;
+                fetch('/api/favourite/toggle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ artist, track })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'removed') fetchFavourites();
+                })
+                .catch(e => console.error('Error removing favourite:', e));
+            });
+        });
+    }
+
+    function fetchFavouriteAlbums() {
+        fetch('/api/favourite_albums?limit=10')
+            .then(r => r.json())
+            .then(data => {
+                const list = document.getElementById('favouriteAlbumsList');
+                if (data.length === 0) {
+                    list.innerHTML = '<li>No favourite albums yet</li>';
+                    return;
+                }
+                list.innerHTML = data.map(f => `
+                    <li style="display: flex; align-items: center; gap: 8px;">
+                        <img src="${escapeHtml(f.art_url || 'https://via.placeholder.com/24?text=🎵')}" onerror="this.src='https://via.placeholder.com/24?text=🎵'">
+                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(f.artist)} – ${escapeHtml(f.album)}</span>
+                        <button class="delete-fav-album-btn" data-artist="${escapeHtml(f.artist)}" data-album="${escapeHtml(f.album)}" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.8rem;" title="Remove from favourites">❌</button>
+                    </li>
+                `).join('');
+                attachFavAlbumDeleteHandlers();
+            })
+            .catch(e => console.error('Favourite albums error:', e));
+    }
+
+    function attachFavAlbumDeleteHandlers() {
+        document.querySelectorAll('.delete-fav-album-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const artist = this.dataset.artist;
+                const album = this.dataset.album;
+                if (!confirm(`Remove "${artist} – ${album}" from favourite albums?`)) return;
+                fetch('/api/favourite_album/toggle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ artist, album })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'removed') fetchFavouriteAlbums();
+                })
+                .catch(e => console.error('Error removing favourite album:', e));
+            });
+        });
+    }
+
     let currentOffset = 0; const limit = 25;
     function loadScrobbles(offset) {
         const container = document.getElementById('scrobbleList');
@@ -3201,6 +3249,7 @@ fetchFavouriteAlbums();
             const dateStr = formatRelativeTime(s.timestamp);
             html += `
                 <div class="scrobble-item" data-id="${s.id}">
+                    <input type="checkbox" class="scrobble-checkbox" data-id="${s.id}" style="margin-right:8px; transform:scale(1.2); cursor:pointer;">
                     <img class="album-art" src="${escapeHtml(artUrl)}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
                     <div class="track-info">
                         <div class="track-name">${escapeHtml(s.track)}</div>
@@ -3209,12 +3258,13 @@ fetchFavouriteAlbums();
                     </div>
                     <div class="scrobble-date">${dateStr}</div>
                     <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
-                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON" style="text-decoration:none; font-size:1.2rem; margin-left:4px; opacity:0.6; color:var(--text-secondary);">⬇️</a>
+                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON">⬇️</a>
                 </div>
             `;
         }
         container.innerHTML = html;
         attachDeleteHandlers();
+        updateSelectedCount();
     }
 
     function attachDeleteHandlers() {
@@ -3229,52 +3279,6 @@ fetchFavouriteAlbums();
             btn._listener = listener;
         });
     }
-
-function attachFavAlbumDeleteHandlers() {
-    document.querySelectorAll('.delete-fav-album-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const artist = this.dataset.artist;
-            const album = this.dataset.album;
-            if (!confirm(`Remove "${artist} – ${album}" from favourite albums?`)) return;
-            fetch('/api/favourite_album/toggle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ artist, album })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'removed') {
-                    fetchFavouriteAlbums();   // refresh the list
-                }
-            })
-            .catch(e => console.error('Error removing favourite album:', e));
-        });
-    });
-}
-
-function attachFavDeleteHandlers() {
-    document.querySelectorAll('.delete-fav-btn').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const artist = this.dataset.artist;
-            const track = this.dataset.track;
-            if (!confirm(`Remove "${artist} – ${track}" from favourites?`)) return;
-            fetch('/api/favourite/toggle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ artist, track })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.status === 'removed') {
-                    fetchFavourites();   // refresh the list
-                }
-            })
-            .catch(e => console.error('Error removing favourite:', e));
-        });
-    });
-}
 
     async function deleteScrobble(scrobbleId, rowElement) {
         if (!confirm("Are you sure you want to delete this scrobble? This cannot be undone.")) return;
@@ -3291,7 +3295,7 @@ function attachFavDeleteHandlers() {
                 fetchTopDays();
                 fetchTopPlaylists();
                 fetchTopGenres();
-                fetchGenreDistribution();  // refresh pie chart
+                fetchGenreDistribution();
             } else {
                 alert(`Error: ${data.error}`);
             }
@@ -3314,37 +3318,70 @@ function attachFavDeleteHandlers() {
     }
 
     function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;'); }
+
     function renderPagination(total, offset) {
         const pagDiv = document.getElementById('pagination');
         if (total <= limit) { pagDiv.innerHTML = ''; return; }
         const currentPage = Math.floor(offset / limit) + 1, totalPages = Math.ceil(total / limit);
         pagDiv.innerHTML = `<button onclick="changePage(-1)" ${offset === 0 ? 'disabled' : ''}>◀ Previous</button><span>Page ${currentPage} of ${totalPages}</span><button onclick="changePage(1)" ${offset + limit >= total ? 'disabled' : ''}>Next ▶</button>`;
     }
+
     function changePage(delta) { let newOffset = currentOffset + delta * limit; if (newOffset < 0) newOffset = 0; currentOffset = newOffset; loadScrobbles(currentOffset); }
     function exportData() { window.location.href = '/export'; }
     function importData(file) { if (!file) return; const formData = new FormData(); formData.append('file', file); fetch('/import', { method: 'POST', body: formData }).then(r => r.json()).then(data => { alert(data.status || data.error); loadScrobbles(currentOffset); fetchStats(); fetchListeningTime(); fetchListeningClock(); fetchWeekdayStats(); fetchTopArtistsByTime(); fetchTopDays(); fetchTopPlaylists(); fetchTopGenres(); fetchGenreDistribution(); }).catch(e => alert('Import failed: ' + e)); }
 
-    fetchNowPlaying();
-    fetchStats();
-    fetchListeningTime();
-    fetchListeningClock();
-    fetchWeekdayStats();
-    fetchTopArtistsByTime();
-    fetchTopDays();
-    fetchTopPlaylists();
-    fetchTopGenres();
-    fetchGenreDistribution();  // initial load
-    loadScrobbles(0);
-    setInterval(fetchNowPlaying, 5000);
+    // ========== MULTI‑SELECT EXPORT ==========
+    function updateSelectedCount() {
+        const checked = document.querySelectorAll('.scrobble-checkbox:checked').length;
+        document.getElementById('selectedCount').innerText = `${checked} selected`;
+    }
 
-// RateYourMusic button for Scrobble Overview page
-(function() {
-    function addButtons() {
-        const container = document.querySelector('.now-playing');
-        if (!container) return;
+    document.getElementById('selectAllBtn').addEventListener('click', function() {
+        const checkboxes = document.querySelectorAll('.scrobble-checkbox');
+        const allChecked = [...checkboxes].every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allChecked);
+        this.innerText = allChecked ? '☐ Select All' : '☑ Deselect All';
+        updateSelectedCount();
+    });
 
-        // --- RYM Button (top‑right) ---
-        if (!document.getElementById('rymButtonOverview')) {
+    document.getElementById('exportSelectedBtn').addEventListener('click', function() {
+        const checked = document.querySelectorAll('.scrobble-checkbox:checked');
+        if (checked.length === 0) {
+            alert('No scrobbles selected.');
+            return;
+        }
+        const ids = [...checked].map(cb => parseInt(cb.dataset.id));
+        fetch('/api/scrobbles/export_selected', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ ids })
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Export failed');
+            return response.blob();
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'scrobbles_export.json';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        })
+        .catch(e => alert('Export failed: ' + e));
+    });
+
+    document.getElementById('scrobbleList').addEventListener('change', function(e) {
+        if (e.target.classList.contains('scrobble-checkbox')) {
+            updateSelectedCount();
+        }
+    });
+
+    // RateYourMusic button
+    (function() {
+        function addButton() {
+            const container = document.querySelector('.now-playing');
+            if (!container || document.getElementById('rymButtonOverview')) return;
             const rymBtn = document.createElement('button');
             rymBtn.id = 'rymButtonOverview';
             rymBtn.innerHTML = '🎵 RYM';
@@ -3377,36 +3414,48 @@ function attachFavDeleteHandlers() {
                 window.open(url, '_blank');
             });
         }
-    }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
+        else addButton();
+        setTimeout(addButton, 1000);
+    })();
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButtons);
-    else addButtons();
-    setTimeout(addButtons, 1000);
-})();
-
-// Make scrollable lists require a click before scrolling
-document.querySelectorAll('.stat-list, .scrobble-list').forEach(list => {
+    fetchNowPlaying();
+    fetchStats();
+    fetchListeningTime();
+    fetchListeningClock();
+    fetchWeekdayStats();
+    fetchTopArtistsByTime();
+    fetchTopDays();
+    fetchTopPlaylists();
+    fetchTopGenres();
+    fetchGenreDistribution();
+    fetchFavourites();
+    fetchFavouriteAlbums();
+    loadScrobbles(0);
+    setInterval(fetchNowPlaying, 5000);
+    
+// Click-to-enable scrolling for all scrollable lists
+document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
+    list.style.overflow = 'hidden';
     list.addEventListener('click', function(e) {
-        // Toggle scrollability
         if (list.style.overflowY === 'auto' || list.style.overflowY === 'scroll') {
-            list.style.overflowY = 'hidden';   // disable scrolling again
+            list.style.overflow = 'hidden';
         } else {
-            list.style.overflowY = 'auto';     // enable scrolling
+            list.style.overflowY = 'auto';
         }
-        // Optionally, stop propagation so the click doesn't trigger on child items
         e.stopPropagation();
     });
 });
 
-// Optional: clicking outside the list re‑locks scrolling
+// Clicking outside any list locks scrolling again
 document.addEventListener('click', function(e) {
-    document.querySelectorAll('.stat-list, .scrobble-list').forEach(list => {
+    document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
         if (!list.contains(e.target)) {
-            list.style.overflowY = 'hidden';
+            list.style.overflow = 'hidden';
         }
     });
 });
-    
+
 </script>
 </body>
 </html>
@@ -3597,6 +3646,7 @@ MONTHLY_TEMPLATE = """
         .download-scrobble { text-decoration: none; font-size: 1.2rem; margin-left: 4px; opacity: 0.6; color: var(--text-secondary); }
         .download-scrobble:hover { opacity: 1; color: var(--accent); }
         .empty-message { padding: 2rem; text-align: center; color: var(--text-muted); }
+        .hidden { display: none; }
 
         /* Heatmap styles */
         .heatmap-grid {
@@ -3777,6 +3827,13 @@ MONTHLY_TEMPLATE = """
             <div style="flex: 1; min-width: 130px;"><label>End Date</label><input type="date" id="searchEndDate" style="width:100%;"></div>
             <div><button id="searchScrobblesBtn" class="backfill-btn" style="background: var(--accent);">Search</button><button id="clearSearchBtn" class="backfill-btn" style="background: #6c757d; margin-left:5px;">Clear</button></div>
         </div>
+
+        <div style="display:flex; gap:10px; align-items:center; margin-top:1rem; margin-bottom:0.5rem;" id="searchActionsBar" class="hidden">
+            <button id="searchSelectAllBtn" style="background:var(--button-bg); border:1px solid var(--button-border); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem;">☐ Select All</button>
+            <button id="searchExportSelectedBtn" style="background:var(--accent); border:none; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem; color:white;">⬇️ Export Selected</button>
+            <span id="searchSelectedCount" style="font-size:0.8rem; color:var(--text-secondary);"></span>
+        </div>
+
         <div id="searchResults" style="margin-top: 1rem;"><div class="empty-message">Enter search criteria and click Search.</div></div>
     </div>
 
@@ -4386,6 +4443,12 @@ MONTHLY_TEMPLATE = """
             });
         }).catch(e => console.error('Error loading playlists:', e));
     }
+
+    function updateSearchSelectedCount() {
+        const checked = document.querySelectorAll('.search-checkbox:checked').length;
+        document.getElementById('searchSelectedCount').innerText = `${checked} selected`;
+    }
+
     function searchScrobbles() {
         const params = new URLSearchParams();
         const track = document.getElementById('searchTrack').value.trim(); if(track) params.append('track', track);
@@ -4399,12 +4462,13 @@ MONTHLY_TEMPLATE = """
         const resultsDiv = document.getElementById('searchResults');
         resultsDiv.innerHTML = '<div class="empty-message">Searching...</div>';
         fetch(`/api/search_scrobbles?${params.toString()}`).then(r=>r.json()).then(data=>{
-            if(data.length===0) { resultsDiv.innerHTML = '<div class="empty-message">No scrobbles found.</div>'; return; }
+            if(data.length===0) { resultsDiv.innerHTML = '<div class="empty-message">No scrobbles found.</div>'; document.getElementById('searchActionsBar').classList.add('hidden'); return; }
             let html = '<div class="scrobble-list">';
             data.forEach(s => {
                 const artUrl = s.art_url || 'https://via.placeholder.com/56?text=🎵';
                 const dateStr = formatRelativeTime(s.timestamp);
                 html += `<div class="scrobble-item" data-id="${s.id}">
+                    <input type="checkbox" class="search-checkbox" data-id="${s.id}" style="margin-right:8px; transform:scale(1.2); cursor:pointer;">
                     <img class="album-art" src="${escapeHtml(artUrl)}" onerror="this.src='https://via.placeholder.com/56?text=🎵'">
                     <div class="track-info">
                         <div class="track-name">${escapeHtml(s.track)}</div>
@@ -4418,7 +4482,10 @@ MONTHLY_TEMPLATE = """
             });
             html += '</div>';
             resultsDiv.innerHTML = html;
+            document.getElementById('searchActionsBar').classList.remove('hidden');
             attachDeleteHandlersToSearch();
+            updateSearchSelectedCount();
+            document.dispatchEvent(new Event('searchResultsLoaded'));
         }).catch(e=>{ console.error(e); resultsDiv.innerHTML = '<div class="empty-message">Error searching scrobbles.</div>'; });
     }
     function attachDeleteHandlersToSearch() {
@@ -4434,8 +4501,10 @@ MONTHLY_TEMPLATE = """
                     const data = await resp.json();
                     if(resp.ok) {
                         row.remove();
+                        updateSearchSelectedCount();
                         if(document.querySelectorAll('#searchResults .scrobble-item').length === 0) {
                             document.getElementById('searchResults').innerHTML = '<div class="empty-message">No scrobbles found.</div>';
+                            document.getElementById('searchActionsBar').classList.add('hidden');
                         }
                     } else alert(`Error: ${data.error}`);
                 } catch(err) { alert("Delete failed: "+err); }
@@ -4444,6 +4513,49 @@ MONTHLY_TEMPLATE = """
             btn._listener = listener;
         });
     }
+
+    // Search multi‑select export
+    document.getElementById('searchSelectAllBtn').addEventListener('click', function() {
+        const checkboxes = document.querySelectorAll('.search-checkbox');
+        const allChecked = [...checkboxes].every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allChecked);
+        this.innerText = allChecked ? '☐ Select All' : '☑ Deselect All';
+        updateSearchSelectedCount();
+    });
+
+    document.getElementById('searchExportSelectedBtn').addEventListener('click', function() {
+        const checked = document.querySelectorAll('.search-checkbox:checked');
+        if (checked.length === 0) {
+            alert('No scrobbles selected.');
+            return;
+        }
+        const ids = [...checked].map(cb => parseInt(cb.dataset.id));
+        fetch('/api/scrobbles/export_selected', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ ids })
+        })
+        .then(response => {
+            if (!response.ok) throw new Error('Export failed');
+            return response.blob();
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'scrobbles_export.json';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        })
+        .catch(e => alert('Export failed: ' + e));
+    });
+
+    document.getElementById('searchResults').addEventListener('change', function(e) {
+        if (e.target.classList.contains('search-checkbox')) {
+            updateSearchSelectedCount();
+        }
+    });
+
     function clearSearch() {
         document.getElementById('searchTrack').value = '';
         document.getElementById('searchArtist').value = '';
@@ -4453,6 +4565,7 @@ MONTHLY_TEMPLATE = """
         document.getElementById('searchGenre').value = '';
         document.getElementById('searchPlaylist').value = '';
         document.getElementById('searchResults').innerHTML = '<div class="empty-message">Enter search criteria and click Search.</div>';
+        document.getElementById('searchActionsBar').classList.add('hidden');
     }
 
     // ========== EVENT LISTENERS ==========
@@ -4501,6 +4614,29 @@ MONTHLY_TEMPLATE = """
     populateGenreDropdown();
     loadNoGenreArtists();
     loadYearlyHeatmap();
+
+// Click-to-enable scrolling for all scrollable lists
+document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
+    list.style.overflow = 'hidden';
+    list.addEventListener('click', function(e) {
+        if (list.style.overflowY === 'auto' || list.style.overflowY === 'scroll') {
+            list.style.overflow = 'hidden';
+        } else {
+            list.style.overflowY = 'auto';
+        }
+        e.stopPropagation();
+    });
+});
+
+// Clicking outside any list locks scrolling again
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.stat-list, .scrobble-list, [style*="max-height"]').forEach(list => {
+        if (!list.contains(e.target)) {
+            list.style.overflow = 'hidden';
+        }
+    });
+});
+
 </script>
 </body>
 </html>
