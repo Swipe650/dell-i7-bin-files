@@ -102,7 +102,7 @@ def backup_database():
     backup_path = os.path.join(BACKUP_DIR, backup_filename)
 
     try:
-        src = sqlite3.connect(DATABASE)
+        src = sqlite3.connect(DATABASE, timeout=10.0)
         dst = sqlite3.connect(backup_path)
         src.backup(dst)
         dst.close()
@@ -114,7 +114,7 @@ def backup_database():
         return None
 
 def migrate_favourites_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS favourites (
         artist TEXT NOT NULL,
@@ -128,7 +128,7 @@ def migrate_favourites_db():
     conn.close()
 
 def migrate_favourite_albums_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS favourite_albums (
         artist TEXT NOT NULL,
@@ -141,7 +141,7 @@ def migrate_favourite_albums_db():
     conn.close()
 
 def migrate_artist_ignore_genre():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS artist_ignore_genre (
         artist TEXT PRIMARY KEY
@@ -150,7 +150,7 @@ def migrate_artist_ignore_genre():
     conn.close()
 
 def migrate_mb_blacklist_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS musicbrainz_tag_blacklist (
         tag TEXT PRIMARY KEY
@@ -160,7 +160,7 @@ def migrate_mb_blacklist_db():
 
 def get_mb_tag_blacklist():
     """Return a set of blacklisted MusicBrainz tags (lowercased)."""
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT tag FROM musicbrainz_tag_blacklist")
     rows = c.fetchall()
@@ -172,7 +172,7 @@ def api_mb_blacklist_add():
     tag = request.get_json().get('tag', '').strip()
     if not tag:
         return jsonify({"error": "Missing tag"}), 400
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO musicbrainz_tag_blacklist (tag) VALUES (?)", (tag.lower(),))
     conn.commit()
@@ -181,7 +181,7 @@ def api_mb_blacklist_add():
 
 @app.route('/api/mb_blacklist')
 def api_mb_blacklist():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT tag FROM musicbrainz_tag_blacklist ORDER BY tag")
     rows = c.fetchall()
@@ -193,7 +193,7 @@ def api_mb_blacklist_remove():
     tag = request.get_json().get('tag', '').strip()
     if not tag:
         return jsonify({"error": "Missing tag"}), 400
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("DELETE FROM musicbrainz_tag_blacklist WHERE tag = ?", (tag.lower(),))
     conn.commit()
@@ -214,7 +214,7 @@ def cleanup_old_backups():
 def vacuum_database():
     """Rebuild the database file to reclaim space and optimise performance."""
     try:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         conn.execute("VACUUM")
         conn.close()
         print("🧹 Database vacuumed successfully.")
@@ -303,7 +303,7 @@ def _rate_limit():
 
 def _get_cached_mb_data(artist_lower):
     """Return (mbid, genres) from cache, or (None, None) if not cached."""
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT mbid, genres FROM artist_musicbrainz_cache WHERE artist_lower=?", (artist_lower,))
     row = c.fetchone()
@@ -312,7 +312,7 @@ def _get_cached_mb_data(artist_lower):
 
 def _save_mb_cache(artist_lower, mbid, genres):
     """Insert or update the MusicBrainz cache entry."""
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     genres_str = ",".join(genres) if genres else ""
     c.execute("INSERT OR REPLACE INTO artist_musicbrainz_cache (artist_lower, mbid, genres, fetched_at) VALUES (?,?,?,?)",
@@ -480,7 +480,7 @@ def scrobble_to_lastfm(network, artist, title, album, timestamp):
 
 # ------------------------- DATABASE -------------------------
 def init_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("PRAGMA journal_mode=WAL;") 
     c.execute('''CREATE TABLE IF NOT EXISTS scrobbles (
@@ -512,9 +512,10 @@ def init_db():
     migrate_artist_ignore_genre()
     migrate_mb_blacklist_db()
     migrate_favourite_albums_db()
+    migrate_artwork_indexes()
 
 def migrate_indexes():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     # Speeds up stats, search, and the poller's genre lookups
     c.execute("CREATE INDEX IF NOT EXISTS idx_scrobbles_artist ON scrobbles(artist)")
@@ -526,7 +527,7 @@ def migrate_indexes():
     print("📊 Database indexes verified/created.")
 
 def migrate_musicbrainz_cache_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS artist_musicbrainz_cache (
         artist_lower TEXT PRIMARY KEY,
@@ -538,7 +539,7 @@ def migrate_musicbrainz_cache_db():
     conn.close()
 
 def migrate_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("PRAGMA table_info(scrobbles)")
     columns = [col[1] for col in c.fetchall()]
@@ -550,7 +551,7 @@ def migrate_db():
     conn.close()
 
 def migrate_genre_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("PRAGMA table_info(scrobbles)")
     columns = [col[1] for col in c.fetchall()]
@@ -564,7 +565,7 @@ def migrate_genre_db():
     conn.close()
 
 def migrate_album_genre_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS album_genre_map (
         album TEXT,
@@ -576,7 +577,7 @@ def migrate_album_genre_db():
     conn.close()
 
 def migrate_artist_genre_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS artist_genre_map (
         artist TEXT PRIMARY KEY,
@@ -584,6 +585,15 @@ def migrate_artist_genre_db():
     )''')
     conn.commit()
     conn.close()
+
+def migrate_artwork_indexes():
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
+    c = conn.cursor()
+    c.execute("CREATE INDEX IF NOT EXISTS idx_scrobbles_art_lookup ON scrobbles(artist, art_url, timestamp DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_scrobbles_album_art_lookup ON scrobbles(artist, album, art_url, timestamp DESC)")
+    conn.commit()
+    conn.close()
+    print("📊 Artwork lookup indexes verified/created.")
 
 def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist=None):
     timestamp = int(time.time())
@@ -594,7 +604,7 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
     genre = None
 
     # --- Determine genre with priority: Artist > Album > MusicBrainz > Playlist ---
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
 
     # 1. Artist genre (highest priority)
@@ -619,7 +629,7 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
 
     # 4. Playlist genre (lowest priority)
     if not genre and playlist:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
         row = c.fetchone()
@@ -628,7 +638,7 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
         conn.close()
 
     # --- Deduplication: skip if the same track/artist was scrobbled in the last 5 seconds ---
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""SELECT id FROM scrobbles 
                  WHERE track=? AND artist=? 
@@ -642,7 +652,7 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
         return  # do not insert
 
     # --- Insert into scrobbles (including the determined genre) ---
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''INSERT INTO scrobbles 
         (timestamp, track, artist, album, art_url, duration_sec, quality, bit_depth, sample_rate, codec, playlist, lastfm_scrobbled, genre)
@@ -658,7 +668,7 @@ def add_scrobble(track, artist, album, art_url, duration_sec, quality, bit_depth
         scrobble_to_lastfm(network, artist, track, album, timestamp)
 
 def get_all_scrobbles(limit=100, offset=0):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute('''SELECT * FROM scrobbles ORDER BY timestamp DESC LIMIT ? OFFSET ?''', (limit, offset))
@@ -667,7 +677,7 @@ def get_all_scrobbles(limit=100, offset=0):
     return [dict(row) for row in rows]
 
 def count_scrobbles():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM scrobbles')
     count = c.fetchone()[0]
@@ -675,7 +685,7 @@ def count_scrobbles():
     return count
 
 def get_top_artists_with_art(limit=50):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT artist, COUNT(*) as playcount,
@@ -692,7 +702,7 @@ def get_top_artists_with_art(limit=50):
     return [{"artist": row[0], "playcount": row[1], "art_url": row[2]} for row in rows]
 
 def get_top_albums_with_art(limit=50):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT artist, album, COUNT(*) as playcount,
@@ -711,7 +721,7 @@ def get_top_albums_with_art(limit=50):
     return [{"artist": row[0], "album": row[1], "playcount": row[2], "art_url": row[3]} for row in rows]
 
 def get_top_tracks_with_art(limit=50):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT artist, track, COUNT(*) as playcount,
@@ -729,7 +739,7 @@ def get_top_tracks_with_art(limit=50):
     return [{"artist": row[0], "track": row[1], "playcount": row[2], "art_url": row[3]} for row in rows]
 
 def get_top_playlists(limit=50):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute('''SELECT playlist, COUNT(*) as count 
                  FROM scrobbles 
@@ -748,7 +758,7 @@ def get_listening_time():
     month_start = int(datetime(now.year, now.month, 1).timestamp())
     year_start = int(datetime(now.year, 1, 1).timestamp())
     
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     
     def sum_seconds(since_ts):
@@ -770,7 +780,7 @@ def get_listening_time():
     }
 
 def export_scrobbles_to_json():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute('SELECT * FROM scrobbles ORDER BY timestamp')
@@ -779,7 +789,7 @@ def export_scrobbles_to_json():
     return [dict(row) for row in rows]
 
 def import_scrobbles_from_json(data):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     inserted = 0
     for item in data:
@@ -1035,7 +1045,7 @@ def export_selected_scrobbles():
     if not ids or not isinstance(ids, list):
         return jsonify({"error": "No IDs provided"}), 400
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     placeholders = ','.join('?' for _ in ids)
@@ -1058,7 +1068,7 @@ def api_favourite_check():
     track = request.args.get('track', '')
     if not artist or not track:
         return jsonify({"favourite": False})
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT 1 FROM favourites WHERE artist=? AND track=?", (artist, track))
     row = c.fetchone()
@@ -1071,7 +1081,7 @@ def api_favourite_album_check():
     album = request.args.get('album', '')
     if not artist or not album:
         return jsonify({"favourite": False})
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT 1 FROM favourite_albums WHERE artist=? AND album=?", (artist, album))
     row = c.fetchone()
@@ -1088,7 +1098,7 @@ def api_favourite_toggle():
     if not artist or not track:
         return jsonify({"error": "Missing artist or track"}), 400
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT 1 FROM favourites WHERE artist=? AND track=?", (artist, track))
     exists = c.fetchone()
@@ -1113,7 +1123,7 @@ def api_favourite_album_toggle():
     if not artist or not album:
         return jsonify({"error": "Missing artist or album"}), 400
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT 1 FROM favourite_albums WHERE artist=? AND album=?", (artist, album))
     exists = c.fetchone()
@@ -1133,7 +1143,7 @@ def api_favourite_album_toggle():
 def api_favourites():
     limit = request.args.get('limit', 50, type=int)
     offset = request.args.get('offset', 0, type=int)
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM favourites ORDER BY added_at DESC LIMIT ? OFFSET ?", (limit, offset))
@@ -1157,7 +1167,7 @@ def tidal_favorite_toggle():
 def api_favourite_albums():
     limit = request.args.get('limit', 50, type=int)
     offset = request.args.get('offset', 0, type=int)
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("SELECT * FROM favourite_albums ORDER BY added_at DESC LIMIT ? OFFSET ?", (limit, offset))
@@ -1194,7 +1204,7 @@ def api_stats():
 def api_today_scrobbles():
     now = datetime.now()
     today_start = int(datetime(now.year, now.month, now.day).timestamp())
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ?", (today_start,))
     count = c.fetchone()[0]
@@ -1207,7 +1217,7 @@ def api_listening_time():
 
 @app.route('/api/listening_clock')
 def api_listening_clock():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT 
@@ -1232,7 +1242,7 @@ def api_listening_clock():
 
 @app.route('/api/scrobbles_by_weekday')
 def api_scrobbles_by_weekday():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT strftime('%w', datetime(timestamp, 'unixepoch')) as wd, COUNT(*)
@@ -1248,7 +1258,7 @@ def api_scrobbles_by_weekday():
 
 @app.route('/api/top_artists_by_time')
 def api_top_artists_by_time():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT artist, SUM(duration_sec) as total_seconds
@@ -1265,7 +1275,7 @@ def api_top_artists_by_time():
 
 @app.route('/api/longest_listening_day')
 def api_longest_listening_day():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT DATE(datetime(timestamp, 'unixepoch')) as day, COUNT(*) as scrobble_count
@@ -1285,7 +1295,7 @@ def api_top_playlists():
 
 @app.route('/api/top_genres')
 def api_top_genres():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT genre, COUNT(*) as count
@@ -1314,7 +1324,7 @@ def api_monthly_report():
     start_ts = int(start_date.timestamp())
     end_ts = int(end_date.timestamp())
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
 
     c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ? AND timestamp < ?", (start_ts, end_ts))
@@ -1385,7 +1395,7 @@ def api_yearly_heatmap():
     start_ts = int(datetime(year, 1, 1).timestamp())
     end_ts = int(datetime(year + 1, 1, 1).timestamp())
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT DATE(datetime(timestamp, 'unixepoch')) as day, COUNT(*) as count
@@ -1403,7 +1413,7 @@ def api_yearly_heatmap():
 
 @app.route('/api/genre_list')
 def api_genre_list():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT DISTINCT genre FROM scrobbles WHERE genre IS NOT NULL AND genre != '' ORDER BY genre")
     rows = c.fetchall()
@@ -1415,7 +1425,7 @@ def api_genre_items():
     genre = request.args.get('genre', '')
     if not genre:
         return jsonify({"error": "Missing genre"}), 400
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     # Artists
     c.execute("SELECT DISTINCT artist FROM scrobbles WHERE genre = ? ORDER BY artist", (genre,))
@@ -1442,7 +1452,7 @@ def api_genre_items():
 @app.route('/api/scrobble/<int:scrobble_id>', methods=['DELETE'])
 def delete_scrobble(scrobble_id):
     try:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("DELETE FROM scrobbles WHERE id = ?", (scrobble_id,))
         conn.commit()
@@ -1481,7 +1491,7 @@ def api_current_genre():
 
     # 1. Artist mapping
     if artist:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("SELECT genre FROM artist_genre_map WHERE artist = ?", (artist,))
         row = c.fetchone()
@@ -1492,7 +1502,7 @@ def api_current_genre():
 
     # 2. Album mapping
     if not genre and album and artist:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("SELECT genre FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
         row = c.fetchone()
@@ -1510,7 +1520,7 @@ def api_current_genre():
 
     # 4. Playlist mapping
     if not genre and playlist:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("SELECT genre FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
         row = c.fetchone()
@@ -1527,7 +1537,7 @@ def api_last_scrobbled():
     track = request.args.get('track', '')
     if not artist or not track:
         return jsonify({"timestamp": None})
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT MAX(timestamp) FROM scrobbles WHERE artist=? AND track=?", (artist, track))
     row = c.fetchone()
@@ -1546,7 +1556,7 @@ def api_search_scrobbles():
     end_date = request.args.get('end_date', '')
     limit = request.args.get('limit', 100, type=int)
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
@@ -1591,7 +1601,7 @@ def api_track_playcount():
     track = request.args.get('track', '')
     if not artist or not track:
         return jsonify({"count": 0})
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM scrobbles WHERE artist=? AND track=?", (artist, track))
     count = c.fetchone()[0]
@@ -1673,7 +1683,7 @@ def view_cache():
 
 @app.route('/api/monthly_trend')
 def api_monthly_trend():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT strftime('%Y-%m', datetime(timestamp, 'unixepoch')) as month,
@@ -1689,7 +1699,7 @@ def api_monthly_trend():
 
 @app.route('/api/playlists')
 def api_playlists():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT DISTINCT playlist FROM scrobbles WHERE playlist IS NOT NULL AND playlist != '' ORDER BY playlist")
     rows = c.fetchall()
@@ -1706,7 +1716,7 @@ def api_rename_playlist():
     if old_name == new_name:
         return jsonify({"status": "no change"})
     try:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("UPDATE scrobbles SET playlist = ? WHERE playlist = ?", (new_name, old_name))
         conn.commit()
@@ -1719,7 +1729,7 @@ def api_rename_playlist():
 # ---------- GENRE MAPPING ENDPOINTS ----------
 @app.route('/api/playlist_genre_map')
 def api_playlist_genre_map():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT playlist_name, genre FROM playlist_genre_map ORDER BY playlist_name")
     rows = c.fetchall()
@@ -1735,14 +1745,14 @@ def api_set_playlist_genre():
         return jsonify({"error": "Missing playlist name"}), 400
     if not genre:
         # Delete mapping
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("DELETE FROM playlist_genre_map WHERE playlist_name = ?", (playlist,))
         conn.commit()
         conn.close()
         return jsonify({"status": "removed"})
     else:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO playlist_genre_map (playlist_name, genre) VALUES (?, ?)", (playlist, genre))
         conn.commit()
@@ -1751,7 +1761,7 @@ def api_set_playlist_genre():
 
 @app.route('/api/backfill_genres', methods=['POST'])
 def api_backfill_genres():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         UPDATE scrobbles
@@ -1775,7 +1785,7 @@ def api_set_artist_genre():
     if not artist:
         return jsonify({"error": "Missing artist name"}), 400
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
 
     if not genre:
@@ -1792,7 +1802,7 @@ def api_set_artist_genre():
 
 @app.route('/api/artist_genre_map')
 def api_artist_genre_map():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT artist, genre FROM artist_genre_map ORDER BY artist")
     rows = c.fetchall()
@@ -1804,7 +1814,7 @@ def api_search_artists():
     query = request.args.get('q', '')
     if not query:
         return jsonify([])
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT DISTINCT artist FROM scrobbles WHERE artist LIKE ? ORDER BY artist LIMIT 50", (f'%{query}%',))
     artists = [row[0] for row in c.fetchall()]
@@ -1835,7 +1845,7 @@ def api_search_artists():
 
 @app.route('/api/album_genre_map')
 def api_album_genre_map():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT artist, album, genre FROM album_genre_map ORDER BY artist, album")
     rows = c.fetchall()
@@ -1847,7 +1857,7 @@ def api_search_albums():
     query = request.args.get('q', '')
     if not query:
         return jsonify([])
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT DISTINCT artist, album FROM scrobbles WHERE album IS NOT NULL AND album != '' AND album LIKE ? ORDER BY album LIMIT 50", (f'%{query}%',))
     rows = c.fetchall()
@@ -1863,14 +1873,14 @@ def api_set_album_genre():
     if not album or not artist:
         return jsonify({"error": "Missing album or artist"}), 400
     if not genre:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("DELETE FROM album_genre_map WHERE album = ? AND artist = ?", (album, artist))
         conn.commit()
         conn.close()
         return jsonify({"status": "removed"})
     else:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO album_genre_map (album, artist, genre) VALUES (?, ?, ?)", (album, artist, genre))
         conn.commit()
@@ -1879,7 +1889,7 @@ def api_set_album_genre():
 
 @app.route('/api/backfill_artist_genres', methods=['POST'])
 def api_backfill_artist_genres():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         UPDATE scrobbles
@@ -1896,7 +1906,7 @@ def api_backfill_artist_genres():
 
 @app.route('/api/backfill_album_genres', methods=['POST'])
 def api_backfill_album_genres():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         UPDATE scrobbles
@@ -1917,7 +1927,7 @@ def api_backfill_album_genres():
 
 @app.route('/api/artists_without_genre')
 def api_artists_without_genre():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("""
         SELECT artist, MAX(timestamp) as last_scrobble
@@ -1938,7 +1948,7 @@ def api_ignore_artist_no_genre():
     artist = data.get('artist', '').strip()
     if not artist:
         return jsonify({"error": "Missing artist name"}), 400
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     try:
         c.execute("INSERT OR IGNORE INTO artist_ignore_genre (artist) VALUES (?)", (artist,))
@@ -1955,7 +1965,7 @@ def api_unignore_artist_no_genre():
     artist = data.get('artist', '').strip()
     if not artist:
         return jsonify({"error": "Missing artist name"}), 400
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("DELETE FROM artist_ignore_genre WHERE artist = ?", (artist,))
     conn.commit()
@@ -1965,7 +1975,7 @@ def api_unignore_artist_no_genre():
 @app.route('/api/backfill_musicbrainz_genres', methods=['POST'])
 def api_backfill_musicbrainz_genres():
     # Fetch all untagged scrobble artists (distinct, to minimise API calls)
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("SELECT DISTINCT artist FROM scrobbles WHERE genre IS NULL OR genre=''")
     artists = [row[0] for row in c.fetchall()]
@@ -1981,7 +1991,7 @@ def api_backfill_musicbrainz_genres():
         top_genre = genres[0]
 
         # Batch update all scrobbles for this artist that still have no genre
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10.0)
         c = conn.cursor()
         c.execute("UPDATE scrobbles SET genre=? WHERE artist=? AND (genre IS NULL OR genre='')",
                   (top_genre, artist))
@@ -1996,7 +2006,7 @@ def api_backfill_musicbrainz_genres():
 @app.route('/api/mb_retag_artist/<artist_name>')
 def api_mb_retag_artist(artist_name):
     # Delete the cache entry so we fetch fresh data
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("DELETE FROM artist_musicbrainz_cache WHERE artist_lower = ?", (artist_name.lower(),))
     conn.commit()
@@ -2008,7 +2018,7 @@ def api_mb_retag_artist(artist_name):
 
     top_genre = genres[0]
     # Update all scrobbles of this artist
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(DATABASE, timeout=10.0)
     c = conn.cursor()
     c.execute("UPDATE scrobbles SET genre = ? WHERE artist = ?", (top_genre, artist_name))
     updated = c.rowcount
@@ -4695,7 +4705,7 @@ def signal_handler(sig, frame):
         """Perform WAL checkpoint, check remote timestamp, and sync if safe."""
         try:
             # Force WAL checkpoint so all data is in the main database file
-            conn = sqlite3.connect(DATABASE)
+            conn = sqlite3.connect(DATABASE, timeout=10.0)
             conn.execute("PRAGMA wal_checkpoint(FULL)")
             conn.close()
 
@@ -4705,7 +4715,7 @@ def signal_handler(sig, frame):
             # SAFETY CHECK: prevent overwriting a newer remote database
             # ------------------------------------------------------------
             local_max = None
-            conn = sqlite3.connect(DATABASE)
+            conn = sqlite3.connect(DATABASE, timeout=10.0)
             cur = conn.cursor()
             cur.execute("SELECT MAX(timestamp) FROM scrobbles")
             row = cur.fetchone()
@@ -4806,7 +4816,7 @@ if __name__ == '__main__':
         # --- Startup sync check: warn if remote database is newer ---
     if not SKIP_SYNC_ON_EXIT:
         try:
-            local_check_conn = sqlite3.connect(DATABASE)
+            local_check_conn = sqlite3.connect(DATABASE, timeout=10.0)
             cur = local_check_conn.cursor()
             cur.execute("SELECT MAX(timestamp) FROM scrobbles")
             local_row = cur.fetchone()
