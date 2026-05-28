@@ -1433,29 +1433,6 @@ def delete_scrobble(scrobble_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/scrobble/<int:scrobble_id>/export')
-def export_single_scrobble(scrobble_id):
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM scrobbles WHERE id = ?", (scrobble_id,))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return jsonify({"error": "Scrobble not found"}), 404
-
-    scrobble = dict(row)
-    # The import expects a list of scrobbles
-    data = [scrobble]
-    json_str = json.dumps(data, indent=2)
-    filename = f"scrobble_{scrobble_id}.json"
-    return send_file(
-        io.BytesIO(json_str.encode('utf-8')),
-        mimetype='application/json',
-        as_attachment=True,
-        download_name=filename
-    )
-
 @app.route('/api/scrobble/now', methods=['POST'])
 def scrobble_now():
     with session["lock"]:
@@ -2936,7 +2913,7 @@ SCROBBLES_TEMPLATE = """
     </div>
 
     <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
-        <button id="selectAllBtn" style="background:var(--button-bg); border:1px solid var(--button-border); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem;">☐ Select All</button>
+        <button id="selectAllBtn" style="background:var(--button-bg); border:1px solid var(--button-border); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem; color: var(--text-primary);">☐ Select All</button>
         <button id="exportSelectedBtn" style="background:var(--accent); border:none; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem; color:white;">⬇️ Export Selected</button>
         <span id="selectedCount" style="font-size:0.8rem; color:var(--text-secondary);"></span>
     </div>
@@ -3258,7 +3235,6 @@ SCROBBLES_TEMPLATE = """
                     </div>
                     <div class="scrobble-date">${dateStr}</div>
                     <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
-                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON">⬇️</a>
                 </div>
             `;
         }
@@ -4477,7 +4453,6 @@ MONTHLY_TEMPLATE = """
                     </div>
                     <div class="scrobble-date">${dateStr}</div>
                     <button class="delete-scrobble" data-id="${s.id}" title="Delete scrobble">🗑️</button>
-                    <a href="/api/scrobble/${s.id}/export" download class="download-scrobble" title="Download scrobble as JSON">⬇️</a>
                 </div>`;
             });
             html += '</div>';
