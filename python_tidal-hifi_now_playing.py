@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-import eventlet
+import warnings
+import os
+import sys
+
+# Temporarily ignore all warnings while importing eventlet
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import eventlet
+
 import logging
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -13,7 +21,11 @@ def _safe_removeHandlerRef(wr):
         pass  # ignore greenlet finalization error
 logging._removeHandlerRef = _safe_removeHandlerRef
 
+# Monkey‑patch silently – temporarily hide the "RLock(s) were not greened" message
+old_stderr = sys.stderr
+sys.stderr = open(os.devnull, 'w')
 eventlet.monkey_patch()
+sys.stderr = old_stderr
 
 import time
 import threading
