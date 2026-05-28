@@ -2932,7 +2932,7 @@ SCROBBLES_TEMPLATE = """
             <ul class="stat-list" id="favouriteAlbumsList"><li>Loading...</li></ul>
         </div>        
         <div class="stat-card">
-            <h3>🤍 Favourite Tracks</h3>
+            <h3>🧡 Favourite Tracks</h3>
             <ul class="stat-list" id="favouritesList"><li>Loading...</li></ul>
         </div>
     </div>
