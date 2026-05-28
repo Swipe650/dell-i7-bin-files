@@ -1190,6 +1190,17 @@ def api_stats():
         "total_scrobbles": total_scrobbles
     })
 
+@app.route('/api/today_scrobbles')
+def api_today_scrobbles():
+    now = datetime.now()
+    today_start = int(datetime(now.year, now.month, now.day).timestamp())
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM scrobbles WHERE timestamp >= ?", (today_start,))
+    count = c.fetchone()[0]
+    conn.close()
+    return jsonify({"count": count})
+
 @app.route('/api/listening_time')
 def api_listening_time():
     return jsonify(get_listening_time())
@@ -2960,6 +2971,20 @@ SCROBBLES_TEMPLATE = """
         }).catch(e => console.error('Now playing error:', e));
     }
 
+function fetchTodayScrobbles() {
+    fetch('/api/today_scrobbles')
+        .then(r => r.json())
+        .then(data => {
+            const badge = document.getElementById('todayScrobblesBadge');
+            if (badge) {
+                badge.innerText = `Today: ${data.count}`;
+            }
+        })
+        .catch(() => {});
+}
+fetchTodayScrobbles();
+setInterval(fetchTodayScrobbles, 60000);
+
     function fetchListeningTime() {
         fetch('/api/listening_time').then(r => r.json()).then(data => {
             document.getElementById('timeToday').innerText = data.today + 'h';
@@ -3366,10 +3391,13 @@ SCROBBLES_TEMPLATE = """
     });
 
     // RateYourMusic button
-    (function() {
-        function addButton() {
-            const container = document.querySelector('.now-playing');
-            if (!container || document.getElementById('rymButtonOverview')) return;
+(function() {
+    function addButtons() {
+        const card = document.querySelector('.now-playing');
+        if (!card) return;
+
+        // --- RYM Button (top‑right) ---
+        if (!document.getElementById('rymButtonOverview')) {
             const rymBtn = document.createElement('button');
             rymBtn.id = 'rymButtonOverview';
             rymBtn.innerHTML = '🎵 RYM';
@@ -3392,8 +3420,8 @@ SCROBBLES_TEMPLATE = """
             });
             rymBtn.addEventListener('mouseenter', () => rymBtn.style.background = 'rgba(0,0,0,0.7)');
             rymBtn.addEventListener('mouseleave', () => rymBtn.style.background = 'rgba(0,0,0,0.5)');
-            if (getComputedStyle(container).position !== 'relative') container.style.position = 'relative';
-            container.appendChild(rymBtn);
+            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+            card.appendChild(rymBtn);
             rymBtn.addEventListener('click', () => {
                 const artist = document.getElementById('nowArtist').innerText;
                 const album = document.getElementById('nowAlbum').innerText;
@@ -3402,10 +3430,35 @@ SCROBBLES_TEMPLATE = """
                 window.open(url, '_blank');
             });
         }
-        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButton);
-        else addButton();
-        setTimeout(addButton, 1000);
-    })();
+
+        // --- Today's Scrobbles Badge (below RYM) ---
+        if (!document.getElementById('todayScrobblesBadge')) {
+            const todayBadge = document.createElement('span');
+            todayBadge.id = 'todayScrobblesBadge';
+            todayBadge.innerHTML = 'Today: ...';
+            Object.assign(todayBadge.style, {
+                position: 'absolute',
+                top: '45px',          // adjust if needed (below RYM button)
+                right: '10px',
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(4px)',
+                borderRadius: '20px',
+                padding: '4px 10px',
+                fontSize: '0.7rem',
+                color: 'white',
+                fontFamily: 'inherit',
+                zIndex: '100',
+                transition: 'background 0.2s'
+            });
+            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+            card.appendChild(todayBadge);
+        }
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButtons);
+    else addButtons();
+    setTimeout(addButtons, 1000);
+})();
 
     fetchNowPlaying();
     fetchStats();
