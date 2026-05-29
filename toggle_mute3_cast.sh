@@ -57,7 +57,7 @@ get_mute_duration() {
 
     # ----- NORMAL TIME‑BASED SCHEDULE -----
     if [[ $hour -ge 6 && $hour -lt 19 ]]; then
-        echo 130
+        echo 170
     elif [[ $hour -ge 19 && $hour -lt 22 ]]; then
         if [[ $dow -ge 1 && $dow -le 5 ]]; then
             echo 140
