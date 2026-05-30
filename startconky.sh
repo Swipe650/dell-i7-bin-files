@@ -4,4 +4,4 @@ killall -9 conky
 sleep 1
 conky -c ~/.conky/Gotham/Gotham &
 conky -c ~/.conky/conky-rtng &
-conky -c ~/.conky/conkytidal/conkytidal-hifi &
+conky -c ~/.conky/conkytidal-hifi/conkytidal-hifi &
