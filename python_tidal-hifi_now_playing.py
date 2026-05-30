@@ -287,7 +287,7 @@ import re
 
 MUSICBRAINZ_USER_AGENT = "TIDALScrobbler/1.0 (kerr_avon@live.com)"  # change email
 MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2"
-MB_REQUEST_DELAY = 1.1   # seconds between API calls (be polite)
+MB_REQUEST_DELAY = 2.5   # seconds between API calls (be polite)
 
 _last_mb_request_time = 0 
 _last_mb_error_time = 0
@@ -327,7 +327,7 @@ def _mb_request(url, params, max_retries=3):
     for attempt in range(max_retries):
         _rate_limit()
         try:
-            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp = requests.get(url, params=params, headers=headers, timeout=30)
             if resp.status_code == 200:
                 return resp
             elif resp.status_code == 503:
