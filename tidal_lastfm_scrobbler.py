@@ -1,11 +1,25 @@
 #!/usr/bin/env python3
-import eventlet
-eventlet.monkey_patch()
+import warnings
+import os
+import sys
 
+# Suppress Eventlet deprecation warning during import
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import eventlet
+
+# Suppress "RLock(s) were not greened" message during monkey patch
+old_stderr = sys.stderr
+sys.stderr = open(os.devnull, 'w')
+eventlet.monkey_patch()
+sys.stderr = old_stderr
+
+# The rest of your imports follow below
 import time
 import subprocess
 import pylast
 import keyring
+# … (all other code stays unchanged)
 
 POLL_INTERVAL = 1
 SCROBBLE_THRESHOLD = 0.5          # 50% of track
@@ -61,7 +75,7 @@ def scrobble_track(network, artist, title, album, timestamp):
     except Exception as e:
         print(f"❌ Scrobble error: {e}")
 
-PLAYERCTL_CMD = ["playerctl", "-i", "plasma-browser-integration"]
+PLAYERCTL_CMD = ["playerctl", "-p", "wiimplay"]
 
 def run_playerctl(*args):
     try:
