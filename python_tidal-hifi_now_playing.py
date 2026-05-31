@@ -1151,6 +1151,17 @@ def api_favourites():
     conn.close()
     return jsonify([dict(row) for row in rows])
 
+@app.route('/api/tidal/favorite/check')
+def tidal_favorite_check():
+    try:
+        resp = requests.get('http://127.0.0.1:47836/current', timeout=2)
+        if resp.status_code == 200:
+            data = resp.json()
+            return jsonify({"favorite": data.get("favorite", False)})
+    except Exception:
+        pass
+    return jsonify({"favorite": False})
+
 @app.route('/api/tidal/favorite/toggle', methods=['POST'])
 def tidal_favorite_toggle():
     try:
@@ -2331,11 +2342,49 @@ function updateFavButton() {
 }
 
 function checkFavourite(artist, track) {
+    // 1. Check local database
     fetch(`/api/favourite/check?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`)
         .then(r => r.json())
         .then(data => {
             isFavourite = data.favourite;
             updateFavButton();
+
+            // 2. Always check Tidal, regardless of local state
+            return fetch('/api/tidal/favorite/check')
+                .then(r => r.json())
+                .then(tidalData => {
+                    if (tidalData.favorite && !isFavourite) {
+                        // Tidal says yes, local says no → add locally
+                        fetch('/api/favourite/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                artist: currentArtist,
+                                track: track,
+                                album: currentAlbum || '',
+                                art_url: document.getElementById('art').src || ''
+                            })
+                        }).then(() => {
+                            isFavourite = true;
+                            updateFavButton();
+                        });
+                    } else if (!tidalData.favorite && isFavourite) {
+                        // Tidal says no, local says yes → remove locally
+                        fetch('/api/favourite/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                artist: currentArtist,
+                                track: track,
+                                album: currentAlbum || '',
+                                art_url: document.getElementById('art').src || ''
+                            })
+                        }).then(() => {
+                            isFavourite = false;
+                            updateFavButton();
+                        });
+                    }
+                });
         })
         .catch(() => {});
 }
@@ -3191,26 +3240,30 @@ setInterval(fetchTodayScrobbles, 60000);
             .catch(e => console.error('Favourites error:', e));
     }
 
-    function attachFavDeleteHandlers() {
-        document.querySelectorAll('.delete-fav-btn').forEach(btn => {
-            btn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                const artist = this.dataset.artist;
-                const track = this.dataset.track;
-                if (!confirm(`Remove "${artist} – ${track}" from favourites?`)) return;
-                fetch('/api/favourite/toggle', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ artist, track })
-                })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.status === 'removed') fetchFavourites();
-                })
-                .catch(e => console.error('Error removing favourite:', e));
-            });
+function attachFavDeleteHandlers() {
+    document.querySelectorAll('.delete-fav-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const artist = this.dataset.artist;
+            const track = this.dataset.track;
+            if (!confirm(`Remove "${artist} – ${track}" from favourites?`)) return;
+            fetch('/api/favourite/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ artist, track })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'removed') {
+                    // Also toggle Tidal to keep it in sync
+                    fetch('/api/tidal/favorite/toggle', { method: 'POST' }).catch(() => {});
+                    fetchFavourites();   // refresh the list
+                }
+            })
+            .catch(e => console.error('Error removing favourite:', e));
         });
-    }
+    });
+}
 
     function fetchFavouriteAlbums() {
         fetch('/api/favourite_albums?limit=10')
