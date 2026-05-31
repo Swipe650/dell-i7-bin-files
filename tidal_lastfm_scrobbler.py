@@ -4,6 +4,42 @@ import os
 import sys
 import json
 
+# ==================== WIIMPLAY MANAGEMENT ====================
+import subprocess
+import atexit
+import signal
+
+WIIMPLAY_BIN = "/home/swipe/bin/wiimplay"  
+wiimplay_process = None
+
+def start_wiimplay():
+    global wiimplay_process
+    if wiimplay_process is None or wiimplay_process.poll() is not None:
+        try:
+            wiimplay_process = subprocess.Popen(
+                [WIIMPLAY_BIN],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
+            )
+            print("✅ wiimplay started for MPRIS support")
+        except FileNotFoundError:
+            print(f"❌ wiimplay binary not found at: {WIIMPLAY_BIN}")
+
+def stop_wiimplay():
+    global wiimplay_process
+    if wiimplay_process and wiimplay_process.poll() is None:
+        try:
+            os.killpg(os.getpgid(wiimplay_process.pid), signal.SIGTERM)
+            wiimplay_process.wait()
+            print("🛑 wiimplay stopped")
+        except ProcessLookupError:
+            pass
+
+atexit.register(stop_wiimplay)
+start_wiimplay()
+
+
 # Suppress Eventlet deprecation warning during import
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
