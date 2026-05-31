@@ -4943,7 +4943,7 @@ if __name__ == '__main__':
     print(f"📀 Database: {DATABASE}")
     print("🌐 Player: http://127.0.0.1:5000")
     print("📊 Overview: http://127.0.0.1:5000/scrobbles")
-    print("📅 Monthly Reports (with playlist rename & genre tagging): http://127.0.0.1:5000/monthly")
+    print("📅 Monthly Reports and Tools: http://127.0.0.1:5000/monthly")
 
     signal.signal(signal.SIGINT, signal_handler)
 
