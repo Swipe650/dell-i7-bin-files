@@ -2051,7 +2051,7 @@ HTML_TEMPLATE = """
         .bg { position:fixed; width:100%; height:100%; background-size:cover; filter:blur(10px) brightness(0.35); z-index:-1; transition: background-image 0.5s ease; }
         .overlay { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; }
         .card { display:flex; gap:40px; background:rgba(0,0,0,0.4); padding:30px; border-radius:20px; backdrop-filter:blur(20px); max-width:90vw; margin-bottom:20px; }
-        .art { width:260px; border-radius:16px; }
+        .art { width:300px; height:auto; object-fit:contain; align-self:flex-start; border-radius:16px; }
         .info { display:flex; flex-direction:column; justify-content:center; min-width: 400px; flex: 1; }
         .track { font-size:2em; word-break:break-word; }
         .artist { color:#ccc; }
