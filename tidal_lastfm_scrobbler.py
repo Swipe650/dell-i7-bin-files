@@ -2,6 +2,7 @@
 import warnings
 import os
 import sys
+import json
 
 # Suppress Eventlet deprecation warning during import
 with warnings.catch_warnings():
@@ -24,6 +25,9 @@ import keyring
 POLL_INTERVAL = 1
 SCROBBLE_THRESHOLD = 0.5          # 50% of track
 MIN_SECONDS_TO_SCROBBLE = 240     # or 4 minutes
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCROBBLES_EXPORT_DIR = os.path.join(SCRIPT_DIR, "scrobbles")
+os.makedirs(SCROBBLES_EXPORT_DIR, exist_ok=True)
 
 LASTFM_SERVICE = "LastFM"
 
@@ -68,12 +72,14 @@ def update_now_playing(network, artist, title, album):
     except Exception as e:
         print(f"⚠️  Now playing error: {e}")
 
-def scrobble_track(network, artist, title, album, timestamp):
+def scrobble_track(network, artist, title, album, timestamp, art_url=""):
     try:
         network.scrobble(artist=artist, title=title, album=album, timestamp=timestamp)
         print(f"📀 Scrobbled: {artist} - {title}")
     except Exception as e:
         print(f"❌ Scrobble error: {e}")
+
+    export_scrobble_json(title, artist, album, timestamp, art_url)
 
 PLAYERCTL_CMD = ["playerctl", "-p", "wiimplay"]
 
@@ -110,6 +116,45 @@ def should_scrobble(max_position, duration_sec):
     progress = max_position / duration_sec
     return progress >= SCROBBLE_THRESHOLD or max_position >= MIN_SECONDS_TO_SCROBBLE
 
+def get_art_url():
+    """Return the current album art URL from playerctl, or empty string."""
+    url = run_playerctl("metadata", "mpris:artUrl")
+    return url if url else ""
+
+def export_scrobble_json(track, artist, album, timestamp, art_url=""):
+    from datetime import datetime
+    date_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d')
+    filename = f"scrobbles_{date_str}.json"
+    filepath = os.path.join(SCROBBLES_EXPORT_DIR, filename)
+
+    scrobbles = []
+    if os.path.exists(filepath):
+        with open(filepath, 'r', encoding='utf-8') as f:
+            try:
+                scrobbles = json.load(f)
+            except json.JSONDecodeError:
+                scrobbles = []
+
+    scrobbles.append({
+        "timestamp": timestamp,
+        "track": track,
+        "artist": artist,
+        "album": album,
+        "art_url": art_url,
+        "duration_sec": 0,
+        "quality": "low",
+        "bit_depth": 0,
+        "sample_rate": 0,
+        "codec": "",
+        "playlist": None,
+        "lastfm_scrobbled": 0,
+        "genre": None
+    })
+
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(scrobbles, f, indent=2)
+
+
 def main():
     network = get_lastfm_network()
     if not network:
@@ -133,10 +178,18 @@ def main():
                 if last_title is not None and not current_track["scrobbled"]:
                     if should_scrobble(current_track["max_position"], current_track["duration_sec"]):
                         scrobble_track(network, current_track["artist"], current_track["title"],
-                                       current_track["album"], current_track["start_time"])
+                                       current_track["album"], current_track["start_time"],
+                                       current_track["art_url"])
                         current_track["scrobbled"] = True
 
-                # New track
+                # New track – allow a moment for metadata to refresh
+                eventlet.sleep(0.2)
+
+                art_url = run_playerctl("metadata", "mpris:artUrl") or ""
+                if not art_url:
+                    eventlet.sleep(0.5)
+                    art_url = run_playerctl("metadata", "mpris:artUrl") or ""
+
                 current_track = {
                     "title": title,
                     "artist": artist,
@@ -145,6 +198,7 @@ def main():
                     "start_time": int(time.time()),
                     "max_position": 0,
                     "scrobbled": False,
+                    "art_url": art_url,
                 }
                 last_title = title
                 update_now_playing(network, artist, title, album)
@@ -157,7 +211,8 @@ def main():
             if position == last_position and last_position > 0 and not current_track["scrobbled"]:
                 if should_scrobble(current_track["max_position"], current_track["duration_sec"]):
                     scrobble_track(network, current_track["artist"], current_track["title"],
-                                   current_track["album"], current_track["start_time"])
+                                   current_track["album"], current_track["start_time"],
+                                   current_track["art_url"])
                     current_track["scrobbled"] = True
 
             last_position = position
@@ -167,7 +222,8 @@ def main():
             if last_title is not None and not current_track["scrobbled"]:
                 if should_scrobble(current_track["max_position"], current_track["duration_sec"]):
                     scrobble_track(network, current_track["artist"], current_track["title"],
-                                   current_track["album"], current_track["start_time"])
+                                   current_track["album"], current_track["start_time"],
+                                   current_track["art_url"])
                     current_track["scrobbled"] = True
                 last_title = None
 
