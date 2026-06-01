@@ -3,5 +3,4 @@ exclude
 scrobbles.db
 scrobbler.lock
 /backups
-/wiimweb
 /wimplay
