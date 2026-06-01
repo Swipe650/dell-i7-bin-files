@@ -4,4 +4,5 @@ scrobbles.db
 scrobbler.lock
 /backups
 /wiimweb/wiimweb_app.py_bak*
+/wiimweb/templates/index.html_bak*
 /wimplay
