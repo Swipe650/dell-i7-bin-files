@@ -3098,16 +3098,12 @@ SCROBBLES_TEMPLATE = """
             <ul class="stat-list" id="favouritesList"><li>Loading...</li></ul>
         </div>
     </div>
-
     <div class="tools">
         <button onclick="exportData()">⬇️ Export JSON</button>
-        <label style="display:inline-flex; align-items:center; gap:6px;">📂 Import JSON
-            <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(this.files[0])">
-        </label>
+        <label …>📂 Import JSON …</label>
+        <button id="fetchLastfmBtn" …>📡 Fetch Last.fm</button>
         <button onclick="location.reload()">🔄 Refresh</button>
-        <button id="fetchLastfmBtn" style="background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; font-size: 0.8rem; cursor: pointer; color: var(--text-primary);">📡 Fetch Last.fm</button>
     </div>
-
     <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
         <button id="selectAllBtn" style="background:var(--button-bg); border:1px solid var(--button-border); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem; color: var(--text-primary);">☐ Select All</button>
         <button id="exportSelectedBtn" style="background:var(--accent); border:none; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:0.8rem; color:white;">⬇️ Export Selected</button>
