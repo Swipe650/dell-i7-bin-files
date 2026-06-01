@@ -223,6 +223,18 @@
         .filter-header input {
             flex: 1;
         }
+        .clear-filter-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0 8px;
+            opacity: 0.6;
+        }
+        .clear-filter-btn:hover {
+            opacity: 1;
+        }
         @media (max-width: 800px) {
             .container {
                 flex-direction: column;
@@ -274,9 +286,10 @@
             </select>
             <div class="track-list">
                 <h3 style="margin: 0 5px 5px 5px;">Playlist Tracks</h3>
-                <div class="filter-header">
-                    <input type="text" id="filterInput" class="filter-input" placeholder="Filter tracks (title, artist, album)...">
-                </div>
+            <div class="filter-header">
+                <input type="text" id="filterInput" class="filter-input" placeholder="Filter tracks (title, artist, album)...">
+                <button id="clearFilterBtn" class="clear-filter-btn" title="Clear filter">✖</button>
+            </div>
                 <div id="trackList"></div>
             </div>
         </div>
@@ -441,18 +454,40 @@
         } catch(e) { console.error("updateCurrentPreset error:", e); }
     }
 
-    async function sendPreset(num) {
-        await fetch('/api/command', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({cmd: `preset:${num}`})
-        });
-        setTimeout(() => {
-            loadTracks();
-            getShuffleStatus();
-            updateCurrentPreset();
-        }, 1000);
-    }
+async function sendPreset(num) {
+    console.log("sendPreset called with num:", num);
+    // 1. Load the preset via HTTP API
+    await fetch('/api/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cmd: `preset:${num}`})
+    });
+
+    // 2. Wait for the device to switch playlists
+    await new Promise(r => setTimeout(r, 1500));
+
+    // 3. Force full track list by toggling shuffle on and off
+    console.log("Toggling shuffle to force full track list");
+    await fetch('/api/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cmd: 'shuffle', value: 'on'})
+    });
+    await new Promise(r => setTimeout(r, 1000));
+
+    await fetch('/api/command', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cmd: 'shuffle', value: 'off'})
+    });
+    await new Promise(r => setTimeout(r, 800));
+
+    // 4. Now fetch the full track list
+    await loadTracks();
+    // 5. Update shuffle button state (should be off)
+    await getShuffleStatus();
+    await updateCurrentPreset();
+}
 
     // ==================== Shuffle ====================
     async function getShuffleStatus() {
@@ -656,6 +691,13 @@
     document.getElementById('filterInput').addEventListener('input', function(e) {
         filterKeyword = e.target.value.toLowerCase();
         filterTracks();
+    });
+    document.getElementById('clearFilterBtn').addEventListener('click', function() {
+        const filterInput = document.getElementById('filterInput');
+        filterInput.value = '';
+        filterKeyword = '';
+        filterTracks();
+        filterInput.focus();
     });
 
     setInterval(fetchStatus, 1000);

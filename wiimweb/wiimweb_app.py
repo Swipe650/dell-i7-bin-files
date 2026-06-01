@@ -152,39 +152,48 @@ def get_position_info():
         return {"track": 0, "duration": "00:00:00", "position": "00:00:00", "position_sec": 0, "duration_sec": 1, "title": "", "artist": "", "album": "", "album_art": "", "bitrate": "", "sample_rate": "", "bit_depth": "", "quality": ""}
 
 def get_track_list():
-    body = '''<u:BrowseQueueEx xmlns:u="urn:schemas-wiimu-com:service:PlayQueue:1">
-                <QueueName>anything</QueueName>
-                <TrackIndex>0</TrackIndex>
-                <TrackNums>500</TrackNums>
-              </u:BrowseQueueEx>'''
-    try:
-        root = upnp_request(WIIM_CTRL_PQ, "BrowseQueueEx", body, service_urn="urn:schemas-wiimu-com:service:PlayQueue:1")
-        queue_ctx_elem = find_element_by_local_name(root, 'QueueContext')
-        if queue_ctx_elem is None or not queue_ctx_elem.text:
-            return []
-        context_xml = html.unescape(queue_ctx_elem.text)
-        tracks = []
-        track_blocks = re.split(r'</?Track\d*>', context_xml)
-        for block in track_blocks:
-            if '<Id>' not in block:
-                continue
-            track_id_match = re.search(r'<Id>(\d+)</Id>', block)
-            title_match = re.search(r'<dc:title>([^<]+)</dc:title>', block)
-            artist_match = re.search(r'<upnp:artist>([^<]+)</upnp:artist>', block)
-            album_match = re.search(r'<upnp:album>([^<]+)</upnp:album>', block)
-            album_art_match = re.search(r'<upnp:albumArtURI>([^<]+)</upnp:albumArtURI>', block)
-            if track_id_match:
-                tracks.append({
-                    "id": track_id_match.group(1),
-                    "title": title_match.group(1) if title_match else "",
-                    "artist": artist_match.group(1) if artist_match else "",
-                    "album": album_match.group(1) if album_match else "",
-                    "album_art": album_art_match.group(1) if album_art_match else ""
-                })
-        return tracks
-    except Exception as e:
-        print(f"GetTrackList error: {e}")
-        return []
+    tracks = []
+    index = 0
+    chunk_size = 200  # fetch 200 tracks per request
+    while True:
+        body = f'''<u:BrowseQueueEx xmlns:u="urn:schemas-wiimu-com:service:PlayQueue:1">
+                    <QueueName>anything</QueueName>
+                    <TrackIndex>{index}</TrackIndex>
+                    <TrackNums>{chunk_size}</TrackNums>
+                  </u:BrowseQueueEx>'''
+        try:
+            root = upnp_request(WIIM_CTRL_PQ, "BrowseQueueEx", body, service_urn="urn:schemas-wiimu-com:service:PlayQueue:1")
+            queue_ctx_elem = find_element_by_local_name(root, 'QueueContext')
+            if queue_ctx_elem is None or not queue_ctx_elem.text:
+                break
+            context_xml = html.unescape(queue_ctx_elem.text)
+            # parse tracks from this chunk
+            chunk_tracks = []
+            track_blocks = re.split(r'</?Track\d*>', context_xml)
+            for block in track_blocks:
+                if '<Id>' not in block:
+                    continue
+                track_id_match = re.search(r'<Id>(\d+)</Id>', block)
+                title_match = re.search(r'<dc:title>([^<]+)</dc:title>', block)
+                artist_match = re.search(r'<upnp:artist>([^<]+)</upnp:artist>', block)
+                album_match = re.search(r'<upnp:album>([^<]+)</upnp:album>', block)
+                album_art_match = re.search(r'<upnp:albumArtURI>([^<]+)</upnp:albumArtURI>', block)
+                if track_id_match:
+                    chunk_tracks.append({
+                        "id": track_id_match.group(1),
+                        "title": title_match.group(1) if title_match else "",
+                        "artist": artist_match.group(1) if artist_match else "",
+                        "album": album_match.group(1) if album_match else "",
+                        "album_art": album_art_match.group(1) if album_art_match else ""
+                    })
+            if not chunk_tracks:
+                break
+            tracks.extend(chunk_tracks)
+            index += chunk_size
+        except Exception as e:
+            print(f"GetTrackList error at index {index}: {e}")
+            break
+    return tracks
 
 def get_loop_mode():
     body = '<u:GetInfoEx xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>{instance_id}</InstanceID></u:GetInfoEx>'
