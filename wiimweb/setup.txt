@@ -1,0 +1,10 @@
+Set up the Python virtual environment and install dependencies:
+
+python -m venv venv
+source venv/bin/activate
+pip install flask requests
+deactivate
+
+To run:
+
+python wiimweb_app.py

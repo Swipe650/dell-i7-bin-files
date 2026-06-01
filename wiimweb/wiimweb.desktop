@@ -1,0 +1,11 @@
+#!/usr/bin/env xdg-open
+# Example of a manual web app launcher
+[Desktop Entry]
+Version=1.0
+Name=WiiM Web Controller (Manual)
+Comment=Control your WiiM Mini
+Exec=/usr/bin/chromium --new-window --app=http://localhost:5001 --window-size=1200,900
+Icon=/home/swipe/bin/wiimweb/wiim_info.png
+Terminal=false
+Type=Application
+Categories=Network;
