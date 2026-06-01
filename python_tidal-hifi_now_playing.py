@@ -1640,6 +1640,119 @@ def import_data():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+@app.route('/api/import_lastfm_scrobbles', methods=['POST'])
+def api_import_lastfm_scrobbles():
+    data = request.get_json()
+    start_str = data.get('start')
+    end_str = data.get('end')
+    if not start_str or not end_str:
+        return jsonify({"error": "Missing start or end time"}), 400
+
+    # --- Read credentials from config file ---
+    config_path = os.path.expanduser("~/.config/lastfm/config.json")
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        user = config['user']
+        api_key = config['apikey']
+    except Exception as e:
+        return jsonify({"error": f"Failed to read config file: {e}"}), 500
+
+    # Convert local datetime strings to Unix timestamps – catch bad formats
+    from datetime import datetime, timezone
+    try:
+        start_ts = int(datetime.fromisoformat(start_str).timestamp())
+        end_ts = int(datetime.fromisoformat(end_str).timestamp())
+    except ValueError:
+        return jsonify({"error": "Invalid date/time format. Please use YYYY-MM-DDTHH:MM."}), 400
+
+    # --- Fetch from Last.fm (reusing the logic from fetch_lastfm_scrobbles.py) ---
+    API_BASE = "http://ws.audioscrobbler.com/2.0/"
+    REQUEST_DELAY = 0.22
+    import requests as req  # avoid conflict with Flask's requests
+
+    def fetch_page(session, page, from_ts, to_ts):
+        params = {
+            "method": "user.getrecenttracks",
+            "user": user,
+            "api_key": api_key,
+            "limit": 200,
+            "page": page,
+            "from": from_ts,
+            "to": to_ts,
+            "format": "json",
+        }
+        resp = session.get(API_BASE, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    scrobbles = []
+    page = 1
+    total_pages = 1
+    with req.Session() as session:
+        session.headers.update({"User-Agent": "TIDALScrobbler/1.0"})
+        while page <= total_pages:
+            data_lf = fetch_page(session, page, start_ts, end_ts)
+            tracks = data_lf.get("recenttracks", {}).get("track", [])
+            if not isinstance(tracks, list):
+                tracks = [tracks]
+            for track in tracks:
+                date_info = track.get("date")
+                if not date_info or not date_info.get("uts"):
+                    continue
+                ts = int(date_info["uts"])
+                # Client‑side time filter (just to be safe)
+                if ts < start_ts or ts > end_ts:
+                    continue
+                # Extract album art
+                art_url = ""
+                images = track.get("image", [])
+                for img in images:
+                    if img.get("size") == "extralarge":
+                        art_url = img.get("#text", "")
+                        break
+                if not art_url and images:
+                    art_url = images[-1].get("#text", "")
+                scrobbles.append({
+                    "timestamp": ts,
+                    "track": track["name"],
+                    "artist": track["artist"]["#text"],
+                    "album": track.get("album", {}).get("#text", "") or "",
+                    "art_url": art_url,
+                    "duration_sec": 0,
+                    "quality": "low",
+                    "bit_depth": 0,
+                    "sample_rate": 0,
+                    "codec": "",
+                    "playlist": None,
+                    "lastfm_scrobbled": 0,
+                    "genre": None,
+                })
+            total_pages = int(data_lf.get("recenttracks", {}).get("@attr", {}).get("totalPages", 1))
+            page += 1
+            time.sleep(REQUEST_DELAY)
+
+    # --- Insert into database (skip duplicates) ---
+    imported = 0
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    for s in scrobbles:
+        c.execute("SELECT id FROM scrobbles WHERE timestamp=? AND artist=? AND track=?",
+                  (s["timestamp"], s["artist"], s["track"]))
+        if not c.fetchone():
+            c.execute('''INSERT INTO scrobbles 
+                (timestamp, track, artist, album, art_url, duration_sec, quality,
+                 bit_depth, sample_rate, codec, playlist, lastfm_scrobbled, genre)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (s["timestamp"], s["track"], s["artist"], s["album"], s["art_url"],
+                 s["duration_sec"], s["quality"], s["bit_depth"], s["sample_rate"],
+                 s["codec"], s["playlist"], s["lastfm_scrobbled"], s["genre"]))
+            imported += 1
+    conn.commit()
+    conn.close()
+
+    return jsonify({"status": "ok", "imported": imported})
+
 @app.route('/control/<action>', methods=['POST'])
 def control(action):
     endpoints = {'playpause': 'playpause', 'next': 'next', 'previous': 'previous'}
@@ -2992,6 +3105,7 @@ SCROBBLES_TEMPLATE = """
             <input type="file" id="importFile" style="display:none" accept=".json" onchange="importData(this.files[0])">
         </label>
         <button onclick="location.reload()">🔄 Refresh</button>
+        <button id="fetchLastfmBtn" style="background: var(--button-bg); border: 1px solid var(--button-border); padding: 0.5rem 1rem; border-radius: 30px; font-size: 0.8rem; cursor: pointer; color: var(--text-primary);">📡 Fetch Last.fm</button>
     </div>
 
     <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
@@ -3006,6 +3120,18 @@ SCROBBLES_TEMPLATE = """
     </div>
 
     <div class="pagination" id="pagination"></div>
+    <div id="lastfmModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; justify-content:center; align-items:center;">
+        <div style="background: var(--bg-card); border-radius:16px; padding:1.5rem; width:320px; max-width:90%; color: var(--text-primary);">
+            <h3 style="margin-top:0; color: var(--accent);">Fetch Scrobbles from Last.fm</h3>
+            <label>Start: <input type="datetime-local" id="lastfmStart" style="width:100%; margin:8px 0; padding:4px; border-radius:8px; border:1px solid var(--border-card); background:var(--button-bg); color:var(--text-primary);"></label>
+            <label>End: <input type="datetime-local" id="lastfmEnd" style="width:100%; margin:8px 0; padding:4px; border-radius:8px; border:1px solid var(--border-card); background:var(--button-bg); color:var(--text-primary);"></label>
+            <div style="display:flex; gap:10px; margin-top:1rem;">
+                <button id="lastfmFetchGo" style="flex:1; background:var(--accent); border:none; padding:8px; border-radius:8px; cursor:pointer; color:white;">Fetch</button>
+                <button id="lastfmModalCancel" style="flex:1; background:#6c757d; border:none; padding:8px; border-radius:8px; cursor:pointer; color:white;">Cancel</button>
+            </div>
+            <p id="lastfmStatus" style="margin-top:12px; font-size:0.85rem; color:var(--text-secondary);"></p>
+        </div>
+    </div>
     <footer>scrobbles stored in scrobbles.db · auto‑scrobbled after 50% or 4 minutes · synced with Last.fm</footer>
 </div>
 
@@ -3557,6 +3683,50 @@ document.addEventListener('click', function(e) {
         if (!list.contains(e.target)) {
             list.style.overflow = 'hidden';
         }
+    });
+});
+
+// --- Last.fm fetch modal ---
+document.getElementById('fetchLastfmBtn').addEventListener('click', function() {
+    document.getElementById('lastfmModal').style.display = 'flex';
+});
+
+document.getElementById('lastfmModalCancel').addEventListener('click', function() {
+    document.getElementById('lastfmModal').style.display = 'none';
+    document.getElementById('lastfmStatus').innerText = '';
+});
+
+document.getElementById('lastfmFetchGo').addEventListener('click', function() {
+    const start = document.getElementById('lastfmStart').value;
+    const end = document.getElementById('lastfmEnd').value;
+    if (!start || !end) {
+        alert('Please select both start and end dates/times.');
+        return;
+    }
+    // Basic ISO check – the browser datetime‑local field should always produce "YYYY-MM-DDTHH:MM"
+        if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$/.test(start) ||
+            !/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$/.test(end)) {   
+        alert('Invalid date/time format. Please use the picker to select a valid date and time.');
+        return;
+    }
+    document.getElementById('lastfmStatus').innerText = 'Fetching…';
+    fetch('/api/import_lastfm_scrobbles', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ start, end })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            document.getElementById('lastfmStatus').innerText = 'Error: ' + data.error;
+        } else {
+            document.getElementById('lastfmStatus').innerText = `Imported ${data.imported} new scrobbles.`;
+            setTimeout(() => { loadScrobbles(currentOffset); }, 1500);
+        }
+    })
+    .catch(e => {
+        document.getElementById('lastfmStatus').innerText = 'Network error.';
+        console.error(e);
     });
 });
 
