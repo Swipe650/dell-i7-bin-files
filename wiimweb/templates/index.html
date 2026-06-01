@@ -309,9 +309,8 @@
     function updatePlayPauseIcon(playing) {
         const btn = document.getElementById('playPauseBtn');
         if (!btn) return;
-        const icon = btn.querySelector('i');
-        if (!icon) return;
-        icon.setAttribute('data-feather', playing ? 'pause' : 'play');
+        const iconName = playing ? 'pause' : 'play';
+        btn.innerHTML = `<i data-feather="${iconName}"></i>`;
         feather.replace();
     }
 
@@ -351,6 +350,20 @@
         }
         setTimeout(() => { playPauseBusy = false; }, 500);
     }
+    
+    async function syncPlayPauseIcon() {
+        try {
+            const resp = await fetch('/api/transport_state');
+            const data = await resp.json();
+            if (data.playing !== isPlaying) {
+                isPlaying = data.playing;
+                updatePlayPauseIcon(isPlaying);
+            }
+        } catch(e) { console.error("syncPlayPauseIcon error", e); }
+    }
+
+    // Call it every 500 ms (or keep 1000 ms if you prefer)
+    setInterval(syncPlayPauseIcon, 500);
 
     // ==================== Playlist & Track Functions ====================
     function filterTracks() {
