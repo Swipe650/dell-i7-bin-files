@@ -73,7 +73,8 @@ current_track_data = {
     "track": "", "artist": "", "album": "", "art": "", "current": "0:00", "duration": "0:00",
     "duration_sec": 0, "progress": 0, "volume": 50, "shuffle": "off", "repeat": "OFF",
     "playing_from": "Playing from: Unknown", "quality_raw": "", "quality": "low",
-    "bitDepth": 0, "sampleRate": 0, "codec": "", "badgeText": ""
+    "bitDepth": 0, "sampleRate": 0, "codec": "", "badgeText": "",
+    "playing": False
 }
 
 session = {
@@ -1000,6 +1001,13 @@ def background_poller():
                 session["last_track_data"]["sample_rate"] = current_track_data.get("sampleRate", session["last_track_data"]["sample_rate"])
                 session["last_track_data"]["codec"] = current_track_data.get("codec", session["last_track_data"]["codec"])
 
+        # Detect playback status
+        status = run_playerctl("status")
+        if status:
+            current_track_data["playing"] = (status.strip() == "Playing")
+        else:
+            current_track_data["playing"] = False
+
         socketio.emit('update', current_track_data)
         eventlet.sleep(POLL_INTERVAL)
 
@@ -1195,7 +1203,8 @@ def api_now():
         "art": current_track_data.get("art", ""),
         "duration": current_track_data.get("duration", "0:00"),
         "current": current_track_data.get("current", "0:00"),
-        "progress": current_track_data.get("progress", 0)
+        "progress": current_track_data.get("progress", 0),
+        "playing": current_track_data.get("playing", False)
     })
 
 @app.route('/api/stats')
@@ -2159,6 +2168,7 @@ HTML_TEMPLATE = """
     <title id="page-title">Now Playing</title>
     <link id="favicon" rel="icon" type="image/png" href="">
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://unpkg.com/feather-icons"></script>
     <style>
         body { margin:0; font-family:-apple-system; color:white; overflow:hidden; }
         .bg { position:fixed; width:100%; height:100%; background-size:cover; filter:blur(10px) brightness(0.35); z-index:-1; transition: background-image 0.5s ease; }
@@ -2175,7 +2185,7 @@ HTML_TEMPLATE = """
         .progress { height:100%; background:#1db954; width:0%; transition:width 0.2s linear; }
         .time { display:flex; justify-content:space-between; font-size:0.8em; color:#aaa; }
         .controls { margin-top:20px; display:flex; gap:20px; flex-wrap: wrap; }
-        .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:1em; transition: background-color 0.2s ease; }
+        .btn { background:rgba(255,255,255,0.1); border:none; color:white; padding:10px 15px; border-radius:10px; cursor:pointer; font-size:0.9em; display:inline-flex; align-items:center; gap:6px; transition: background-color 0.2s ease; }
         .btn:hover { background:rgba(255,255,255,0.25); }
         .tag-bar {
             background: rgba(0,0,0,0.3);
@@ -2224,19 +2234,20 @@ HTML_TEMPLATE = """
             .tag-bar { flex-direction: column; align-items: stretch; border-radius: 12px; padding: 8px; gap: 10px; }
             .tag-item { justify-content: space-between; }
         }
-        #genreModal {
-            display: flex;
-        }
+        #genreModal { display: flex; }
         #genreModal input {
             background: var(--button-bg);
             color: var(--text-primary);
             border: 1px solid var(--border-card);
         }
-        #genreModal button {
-            transition: opacity 0.2s;
-        }
-        #genreModal button:hover {
-            opacity: 0.9;
+        #genreModal button { transition: opacity 0.2s; }
+        #genreModal button:hover { opacity: 0.9; }
+
+        .feather {
+            width: 1.1em;
+            height: 1.1em;
+            stroke-width: 2;
+            stroke: currentColor;
         }
     </style>
 </head>
@@ -2275,9 +2286,9 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="time"><span id="current"></span><span id="duration"></span></div>
                 <div class="controls">
-                    <button class="btn" onclick="control('previous')">⏮ Previous</button>
-                    <button class="btn" onclick="control('playpause')">⏯ Play/Pause</button>
-                    <button class="btn" onclick="control('next')">⏭ Next</button>
+                    <button class="btn" onclick="control('previous')"><i data-feather="skip-back"></i> Previous</button>
+                    <button class="btn" onclick="control('playpause')"><i data-feather="play-circle"></i> Play/Pause</button>
+                    <button class="btn" onclick="control('next')"><i data-feather="skip-forward"></i> Next</button>
                 </div>
                 <div class="meta">
                     <span id="scrobbleCounter" style="margin-right:8px; font-size:0.9em; color:#ccc; font-weight:500; position: relative; top: 1px;">📀 <span id="totalScrobblesDisplay" style="font-weight:bold;">...</span></span>
@@ -2444,30 +2455,26 @@ let isFavourite = false;
 function updateFavButton() {
     const btn = document.getElementById('favBtn');
     if (isFavourite) {
-        btn.innerHTML = '🤍';          // white heart
-        btn.style.fontSize = '1.1em';  // slightly smaller because emoji is larger
+        btn.innerHTML = '🤍';
+        btn.style.fontSize = '1.1em';
         btn.title = 'Remove from favourites';
     } else {
-        btn.innerHTML = '♡';           // hollow heart
-        btn.style.fontSize = '1.6em';  // match the star size
+        btn.innerHTML = '♡';
+        btn.style.fontSize = '1.6em';
         btn.title = 'Add to favourites';
     }
 }
 
 function checkFavourite(artist, track) {
-    // 1. Check local database
     fetch(`/api/favourite/check?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`)
         .then(r => r.json())
         .then(data => {
             isFavourite = data.favourite;
             updateFavButton();
-
-            // 2. Always check Tidal, regardless of local state
             return fetch('/api/tidal/favorite/check')
                 .then(r => r.json())
                 .then(tidalData => {
                     if (tidalData.favorite && !isFavourite) {
-                        // Tidal says yes, local says no → add locally
                         fetch('/api/favourite/toggle', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2482,7 +2489,6 @@ function checkFavourite(artist, track) {
                             updateFavButton();
                         });
                     } else if (!tidalData.favorite && isFavourite) {
-                        // Tidal says no, local says yes → remove locally
                         fetch('/api/favourite/toggle', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2507,8 +2513,6 @@ document.getElementById('favBtn').addEventListener('click', () => {
     const track = document.getElementById('track').innerText;
     const album = currentAlbum || '';
     const art = document.getElementById('art').src || '';
-
-    // 1. Toggle local database favourite
     fetch('/api/favourite/toggle', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -2521,8 +2525,6 @@ document.getElementById('favBtn').addEventListener('click', () => {
         updateFavButton();
     })
     .catch(e => console.error(e));
-
-    // 2. Toggle favourite in TIDAL desktop app (proxied through backend)
     fetch('/api/tidal/favorite/toggle', { method: 'POST' }).catch(() => {});
 });
 
@@ -2640,6 +2642,15 @@ function setupRetagButton() {
     }
 }
 
+function updatePlayPauseIcon(isPlaying) {
+    const btn = document.querySelector('button[onclick*="playpause"]');
+    if (!btn) return;
+    btn.innerHTML = isPlaying
+        ? '<i data-feather="pause-circle"></i> Pause'
+        : '<i data-feather="play-circle"></i> Play';
+    feather.replace();
+}
+
 function updateUI(data) {
     document.getElementById('track').innerText = data.track;
     checkFavourite(data.artist, data.track);
@@ -2661,6 +2672,9 @@ function updateUI(data) {
     updateBitrateColor(data.quality, bitrateText);
     updateArt(data.art);
     document.getElementById('page-title').innerText = `${data.artist} - ${data.track}`;
+    if (typeof data.playing !== 'undefined') {
+        updatePlayPauseIcon(data.playing);
+    }
     document.getElementById('favicon').href = data.art;
     trackDurationSec = data.duration_sec || trackDurationSec;
     updateTaggingInfo(data);
@@ -2793,11 +2807,10 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
         const card = document.querySelector('.card');
         if (!card) return;
 
-        // --- SO Button (left of RYM) ---
         if (!document.getElementById('soButton')) {
             const soBtn = document.createElement('button');
             soBtn.id = 'soButton';
-            soBtn.innerHTML = '📀';
+            soBtn.innerHTML = '<i data-feather="list"></i>';
             soBtn.title = 'Open Scrobble Overview';
             Object.assign(soBtn.style, {
                 position: 'absolute',
@@ -2822,7 +2835,6 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
             soBtn.addEventListener('click', () => window.open('/scrobbles', '_blank'));
         }
 
-        // --- RYM Button (right edge) ---
         if (!document.getElementById('rymButton')) {
             const rymBtn = document.createElement('button');
             rymBtn.id = 'rymButton';
@@ -2856,17 +2868,21 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
                 window.open(url, '_blank');
             });
         }
+
+        feather.replace();
     }
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', addButtons);
-    else addButtons();
-    setTimeout(addButtons, 1000);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', addButtons);
+    } else {
+        addButtons();
+    }
 })();
 
 fetchTotalScrobbles();
 setInterval(fetchTotalScrobbles, 60000);
 setupRetagButton();
-
+feather.replace();
 </script>
 </body>
 </html>
