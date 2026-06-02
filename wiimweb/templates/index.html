@@ -556,20 +556,13 @@ async function sendPreset(num) {
         updateMuteButton();
     }
 
-    function updateMuteButton() {
-        const muteBtn = document.getElementById('muteBtn');
-        if (!muteBtn) return;
-        const icon = muteBtn.querySelector('i');
-        if (!icon) return;
-        if (muted) {
-            muteBtn.classList.add('muted');
-            icon.setAttribute('data-feather', 'volume-x');
-        } else {
-            muteBtn.classList.remove('muted');
-            icon.setAttribute('data-feather', 'volume-2');
-        }
-        feather.replace();
-    }
+function updateMuteButton() {
+    const muteBtn = document.getElementById('muteBtn');
+    if (!muteBtn) return;
+    const iconName = muted ? 'volume-x' : 'volume-2';
+    muteBtn.innerHTML = `<i data-feather="${iconName}"></i>`;
+    feather.replace();
+}
 
     // ==================== Now Playing & Seeking ====================
     async function fetchStatus() {
