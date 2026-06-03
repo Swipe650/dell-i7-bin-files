@@ -8,23 +8,43 @@ import json
 import subprocess
 import atexit
 import signal
+import os
 
-WIIMPLAY_BIN = "/home/swipe/bin/wiimplay"  
+WIIMPLAY_BIN = "wiimplay"   # now just the name, since PATH is extended
 wiimplay_process = None
+
+# Extend PATH to include ~/bin
+os.environ['PATH'] = f"{os.environ['HOME']}/bin:{os.environ['PATH']}"
+
+def detect_wayland():
+    """Return True if running under Wayland."""
+    session_type = os.getenv('XDG_SESSION_TYPE', '').lower()
+    wayland_display = os.getenv('WAYLAND_DISPLAY', '')
+    return session_type == 'wayland' or wayland_display != ''
 
 def start_wiimplay():
     global wiimplay_process
     if wiimplay_process is None or wiimplay_process.poll() is not None:
         try:
+            # Prepare environment for the child process
+            env = os.environ.copy()
+            if detect_wayland():
+                print("Wayland detected - setting GDK_BACKEND=x11 for wiimplay")
+                env['GDK_BACKEND'] = 'x11'
+            else:
+                print("X11 detected - no special backend needed")
+                env.pop('GDK_BACKEND', None)
+
             wiimplay_process = subprocess.Popen(
                 [WIIMPLAY_BIN],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid
+                preexec_fn=os.setsid,
+                env=env
             )
             print("✅ wiimplay started for MPRIS support")
         except FileNotFoundError:
-            print(f"❌ wiimplay binary not found at: {WIIMPLAY_BIN}")
+            print(f"❌ wiimplay binary not found in PATH (searched: {os.environ['PATH']})")
 
 def stop_wiimplay():
     global wiimplay_process
@@ -38,6 +58,7 @@ def stop_wiimplay():
 
 atexit.register(stop_wiimplay)
 start_wiimplay()
+# ==================== END WIIMPLAY MANAGEMENT ====================
 
 
 # Suppress Eventlet deprecation warning during import
