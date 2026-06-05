@@ -14,12 +14,7 @@ import os
 #  Helper: get metadata from wiimplay using playerctl -p wiimplay
 # ----------------------------------------------------------------------
 def get_wiimplay_metadata():
-    """
-    Returns a tuple: (title, artist, album, art_url)
-    If wiimplay is not running or metadata is missing, returns ('', '', '', '')
-    """
     try:
-        # Use -p wiimplay to target that specific player
         out = subprocess.check_output(
             ['playerctl', '-p', 'wiimplay', 'metadata', '--format',
              '{{ title }}||{{ artist }}||{{ album }}||{{ mpris:artUrl }}'],
@@ -28,13 +23,11 @@ def get_wiimplay_metadata():
         ).decode().strip()
         if out and '||' in out:
             title, artist, album, art_url = out.split('||', 3)
-            # playerctl prints "null" for missing values
             return ('' if title == 'null' else title,
                     '' if artist == 'null' else artist,
                     '' if album == 'null' else album,
                     '' if art_url == 'null' else art_url)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
-            FileNotFoundError):
+    except:
         pass
     return ('', '', '', '')
 
@@ -47,11 +40,16 @@ class WiimplayWidget(Gtk.Window):
         self.set_skip_taskbar_hint(True)
         self.set_skip_pager_hint(True)
         self.set_app_paintable(True)
-
-        # Keep below other windows (background widget)
         self.set_keep_below(True)
 
-        # Transparency using CSS
+        # Fixed size (the KWin rule uses these dimensions)
+        self.set_default_size(290, 180)
+        self.set_size_request(290, 180)
+
+        # Start hidden
+        self.hide()
+
+        # Transparency
         self.set_visual(self.get_screen().get_rgba_visual())
         css_opacity = b"window { opacity: 0.95; }"
         opacity_provider = Gtk.CssProvider()
@@ -66,7 +64,7 @@ class WiimplayWidget(Gtk.Window):
         main_box.set_margin_end(8)
         self.add(main_box)
 
-        # Album art - align to top
+        # Album art
         self.image = Gtk.Image()
         self.image.set_size_request(64, 64)
         self.image.set_valign(Gtk.Align.START)
@@ -79,7 +77,7 @@ class WiimplayWidget(Gtk.Window):
         text_grid.set_hexpand(True)
         main_box.pack_start(text_grid, True, True, 0)
 
-        # Title row
+        # Title row (ellipsis)
         self.title_header = Gtk.Label()
         self.title_header.set_markup("<b>Title:</b>")
         self.title_header.set_halign(Gtk.Align.START)
@@ -91,7 +89,7 @@ class WiimplayWidget(Gtk.Window):
         self.title_value.set_text("Unknown Title")
         text_grid.attach(self.title_value, 1, 0, 1, 1)
 
-        # Artist row
+        # Artist row (ellipsis)
         self.artist_header = Gtk.Label()
         self.artist_header.set_markup("<b>Artist:</b>")
         self.artist_header.set_halign(Gtk.Align.START)
@@ -103,19 +101,26 @@ class WiimplayWidget(Gtk.Window):
         self.artist_value.set_text("Unknown Artist")
         text_grid.attach(self.artist_value, 1, 1, 1, 1)
 
-        # Album row
+        # Album row (wraps, top‑aligned)
         self.album_header = Gtk.Label()
         self.album_header.set_markup("<b>Album:</b>")
         self.album_header.set_halign(Gtk.Align.START)
+        self.album_header.set_valign(Gtk.Align.START)
         text_grid.attach(self.album_header, 0, 2, 1, 1)
 
         self.album_value = Gtk.Label()
         self.album_value.set_halign(Gtk.Align.START)
-        self.album_value.set_ellipsize(Pango.EllipsizeMode.END)
+        self.album_value.set_valign(Gtk.Align.START)
+        self.album_value.set_line_wrap(True)
+        self.album_value.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.album_value.set_max_width_chars(35)
+        self.album_value.set_margin_start(0)      # remove any left margin
+        self.album_value.set_margin_end(0)        # remove any right margin
+        self.album_value.set_xalign(0.0)          # force text to left edge
         self.album_value.set_text("Unknown Album")
         text_grid.attach(self.album_value, 1, 2, 1, 1)
 
-        # Apply fonts via CSS
+        # Fonts
         css_font = b"""
             .header { font-size: 9pt; font-weight: bold; }
             .value { font-size: 10pt; }
@@ -131,54 +136,63 @@ class WiimplayWidget(Gtk.Window):
 
         self.set_default_image()
 
-        # Position window (bottom‑right)
         self.connect("realize", self.position_window)
 
-        # Store the last known track to avoid unnecessary UI updates
         self.last_track = ""
 
-        # --- Process check loop: show widget only when wiimplay is running ---
+        # --- Process detection: show widget only when wiimplay is running ---
         def check_wiimplay():
-            # Look for a process named 'wiimplay' (adjust if the binary name differs)
             wiimplay_running = any("wiimplay" in p.name().lower() for p in psutil.process_iter())
             if wiimplay_running:
                 if not self.is_visible():
                     self.show_all()
-                    self.reposition()
             else:
                 if self.is_visible():
                     self.hide()
             return True
 
         GLib.timeout_add_seconds(2, check_wiimplay)
-
-        # --- Polling for metadata (only when visible) ---
         GLib.timeout_add_seconds(2, self.poll_metadata)
 
-    # ------------------------------------------------------------------
-    #  Helper: update UI from playerctl -p wiimplay command
-    # ------------------------------------------------------------------
     def poll_metadata(self):
         if not self.is_visible():
             return True
 
-        title, artist, album, art_url = get_wiimplay_metadata()
-
+        title, artist, album, art_url = get_playerctl_metadata()
         track_id = f"{title}|{artist}|{album}"
 
         if track_id != self.last_track:
             self.last_track = track_id
-
+            # Update text immediately
             self.title_value.set_text(title if title else "Unknown Title")
             self.artist_value.set_text(artist if artist else "Unknown Artist")
             self.album_value.set_text(album if album else "Unknown Album")
 
-            if art_url:
-                threading.Thread(target=self.load_album_art, args=(art_url,), daemon=True).start()
-            else:
-                self.set_default_image()
+            # Schedule retries for album art
+            def try_load_art(retry_count=0):
+                if retry_count >= 3:
+                    print("Failed to load album art after 3 attempts. Using default.")
+                    self.set_default_image()
+                    return
+                # Re-fetch the metadata to get the art_url
+                _, _, _, current_art_url = get_playerctl_metadata()
+                if current_art_url:
+                    print(f"Retry {retry_count+1}: Art URL found, loading...")
+                    threading.Thread(target=self.load_album_art,
+                                     args=(current_art_url,),
+                                     daemon=True).start()
+                else:
+                    print(f"Retry {retry_count+1}: Art URL not found, retrying...")
+                    GLib.timeout_add_seconds(1, lambda: try_load_art(retry_count + 1))
 
-            self.reposition()
+            # Start the first attempt with the original art_url
+            if art_url:
+                threading.Thread(target=self.load_album_art,
+                                 args=(art_url,),
+                                 daemon=True).start()
+            else:
+                print("Initial art_url missing. Starting fallback retry loop.")
+                GLib.timeout_add_seconds(1, try_load_art)
 
         return True
 
@@ -187,7 +201,7 @@ class WiimplayWidget(Gtk.Window):
     # ------------------------------------------------------------------
     def set_default_image(self):
         pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 64, 64)
-        pixbuf.fill(0x444444ff)   # dark grey
+        pixbuf.fill(0x444444ff)
         self.image.set_from_pixbuf(pixbuf)
 
     def load_album_art(self, url):
@@ -226,35 +240,16 @@ class WiimplayWidget(Gtk.Window):
             GLib.idle_add(self.set_default_image)
 
     # ------------------------------------------------------------------
-    #  Window positioning (flush right, gap_y=35)
+    #  Window positioning (no reposition needed – KWin rule handles it)
     # ------------------------------------------------------------------
     def position_window(self, _widget):
-        self.reposition()
-
-    def reposition(self):
-        display = Gdk.Display.get_default()
-        if display:
-            monitor = display.get_primary_monitor()
-            if not monitor:
-                monitor = display.get_monitor(0)
-            geometry = monitor.get_geometry()
-            width, height = self.get_size()
-
-            self.set_size_request(290, -1)
-            width, height = self.get_size()
-
-            x = geometry.x + geometry.width - width
-            y = geometry.y + geometry.height - height - 35
-
-            self.set_gravity(Gdk.Gravity.NORTH_EAST)
-            self.move(x, y)
-            self.get_display().flush()
+        # The KWin rule forces the correct position; nothing to do here.
+        pass
 
 
 def main():
     Gtk.init(None)
     widget = WiimplayWidget()
-    widget.show_all()
     signal.signal(signal.SIGINT, lambda sig, frame: Gtk.main_quit())
     Gtk.main()
 
