@@ -21,7 +21,8 @@ def get_playerctl_metadata():
     try:
         # Get all fields at once using --format
         out = subprocess.check_output(
-            ['playerctl', 'metadata', '--format',
+            #['playerctl', 'metadata', '--format',
+            ['playerctl', '-i', 'plasma-browser-integration', 'metadata', '--format',
              '{{ title }}||{{ artist }}||{{ album }}||{{ mpris:artUrl }}'],
             stderr=subprocess.DEVNULL,
             timeout=1
