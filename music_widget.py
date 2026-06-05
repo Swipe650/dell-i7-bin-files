@@ -1,13 +1,43 @@
 #!/usr/bin/env python3
 
 import gi
-gi.require_version('Playerctl', '2.0')
 gi.require_version('Gtk', '3.0')
-from gi.repository import Playerctl, Gtk, GLib, GdkPixbuf, Gdk, Pango
+from gi.repository import Gtk, GLib, Gdk, GdkPixbuf, Pango
 import urllib.request
 import threading
 import signal
 import psutil
+import subprocess
+import os
+
+# ----------------------------------------------------------------------
+#  Helper: get metadata using the playerctl command‑line tool
+# ----------------------------------------------------------------------
+def get_playerctl_metadata():
+    """
+    Returns a tuple: (title, artist, album, art_url)
+    If no player is running or metadata is missing, returns ('', '', '', '')
+    """
+    try:
+        # Get all fields at once using --format
+        out = subprocess.check_output(
+            ['playerctl', 'metadata', '--format',
+             '{{ title }}||{{ artist }}||{{ album }}||{{ mpris:artUrl }}'],
+            stderr=subprocess.DEVNULL,
+            timeout=1
+        ).decode().strip()
+        if out and '||' in out:
+            title, artist, album, art_url = out.split('||', 3)
+            # playerctl prints "null" for missing values
+            return ('' if title == 'null' else title,
+                    '' if artist == 'null' else artist,
+                    '' if album == 'null' else album,
+                    '' if art_url == 'null' else art_url)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError):
+        pass
+    return ('', '', '', '')
+
 
 class MusicWidget(Gtk.Window):
     def __init__(self):
@@ -18,7 +48,10 @@ class MusicWidget(Gtk.Window):
         self.set_skip_pager_hint(True)
         self.set_app_paintable(True)
 
-        # Transparency using CSS (no deprecation warning)
+        # Keep below other windows (so it stays in background)
+        self.set_keep_below(True)
+
+        # Transparency using CSS
         self.set_visual(self.get_screen().get_rgba_visual())
         css_opacity = b"window { opacity: 0.95; }"
         opacity_provider = Gtk.CssProvider()
@@ -54,7 +87,6 @@ class MusicWidget(Gtk.Window):
 
         self.title_value = Gtk.Label()
         self.title_value.set_halign(Gtk.Align.START)
-        # The ellipsize mode should come from Pango
         self.title_value.set_ellipsize(Pango.EllipsizeMode.END)
         self.title_value.set_text("Unknown Title")
         text_grid.attach(self.title_value, 1, 0, 1, 1)
@@ -83,7 +115,7 @@ class MusicWidget(Gtk.Window):
         self.album_value.set_text("Unknown Album")
         text_grid.attach(self.album_value, 1, 2, 1, 1)
 
-        # Apply fonts via CSS (no modify_font deprecation)
+        # Apply fonts via CSS
         css_font = b"""
             .header { font-size: 9pt; font-weight: bold; }
             .value { font-size: 10pt; }
@@ -99,94 +131,76 @@ class MusicWidget(Gtk.Window):
 
         self.set_default_image()
 
-        # Playerctl setup
-        self.manager = Playerctl.PlayerManager()
-        self.manager.connect("name-appeared", self.on_player_appeared)
-        self.manager.connect("player-vanished", self.on_player_vanished)
-
-        players = self.manager.props.player_names
-        if players:
-            self.on_player_appeared(self.manager, players[0])
-
+        # Position window (bottom‑right)
         self.connect("realize", self.position_window)
-        
-                # --- Process check loop to show widget only when Tidal is running ---
+
+        # Store the last known track to avoid unnecessary UI updates
+        self.last_track = ""
+
+        # --- Polling for Tidal process (show/hide widget) ---
         def check_tidal():
-            # Check if the Tidal process is running by searching for "tidal" in process names
             tidal_running = any("tidal" in p.name().lower() for p in psutil.process_iter())
-            
-            # The widget should only be visible when Tidal is running
             if tidal_running:
                 if not self.is_visible():
-                    self.show_all()  # Show the widget and reposition it
+                    self.show_all()
                     self.reposition()
             else:
                 if self.is_visible():
-                    self.hide()      # Hide the widget
-            
-            return True  # Keep the timer running
+                    self.hide()
+            return True
 
-        # Check every 2 seconds
         GLib.timeout_add_seconds(2, check_tidal)
-        
-        GLib.timeout_add_seconds(1, self.poll_metadata)
 
-    # ---------------------------
-    # Playerctl event handlers
-    # ---------------------------
-    def on_player_appeared(self, manager, player_name):
-        if hasattr(self, 'player') and self.player:
-            return
-        self.player = Playerctl.Player.new_from_name(player_name)
-        self.player.connect("metadata", self.on_metadata_change)
-        self.poll_metadata()
+        # --- Polling for metadata (only when visible) ---
+        GLib.timeout_add_seconds(2, self.poll_metadata)
 
-    def on_player_vanished(self, manager, player_name):
-        if hasattr(self, 'player') and self.player:
-            self.player = None
-            self.artist_value.set_text("No media player found")
-            self.title_value.set_text("")
-            self.album_value.set_text("")
-            self.set_default_image()
+    # ------------------------------------------------------------------
+    #  Helper: update UI from playerctl command output
+    # ------------------------------------------------------------------
+    def poll_metadata(self):
+        # Only update if the widget is currently visible (Tidal is running)
+        if not self.is_visible():
+            return True
+
+        title, artist, album, art_url = get_playerctl_metadata()
+
+        # Build a unique track identifier
+        track_id = f"{title}|{artist}|{album}"
+
+        # Update UI only when the track has changed
+        if track_id != self.last_track:
+            self.last_track = track_id
+
+            # Update labels (fallback to "Unknown" if empty)
+            self.title_value.set_text(title if title else "Unknown Title")
+            self.artist_value.set_text(artist if artist else "Unknown Artist")
+            self.album_value.set_text(album if album else "Unknown Album")
+
+            # Update album art in a background thread
+            if art_url:
+                threading.Thread(target=self.load_album_art, args=(art_url,), daemon=True).start()
+            else:
+                self.set_default_image()
+
+            # Reposition (in case size changes due to longer text)
             self.reposition()
 
-    def on_metadata_change(self, player, metadata):
-        if isinstance(metadata, GLib.Variant):
-            metadata = metadata.unpack()
-        
-        artist_list = metadata.get('xesam:artist', ['Unknown Artist'])
-        artist = artist_list[0] if artist_list else 'Unknown Artist'
-        title = metadata.get('xesam:title', 'Unknown Title')
-        album = metadata.get('xesam:album', 'Unknown Album')
-        art_url = metadata.get('mpris:artUrl', None)
+        return True
 
-        self.artist_value.set_text(artist)
-        self.title_value.set_text(title)
-        self.album_value.set_text(album)
-
-        if art_url:
-            threading.Thread(target=self.load_album_art, args=(art_url,), daemon=True).start()
-        else:
-            self.set_default_image()
-
-        self.reposition()
-
-    # ---------------------------
-    # Album art helpers
-    # ---------------------------
+    # ------------------------------------------------------------------
+    #  Album art helpers (unchanged from your working version)
+    # ------------------------------------------------------------------
     def set_default_image(self):
-        # Use a dark grey (or any color) so it's visible
         pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 64, 64)
-        pixbuf.fill(0x444444ff)   # dark grey, alpha=255
+        pixbuf.fill(0x444444ff)   # dark grey
         self.image.set_from_pixbuf(pixbuf)
 
     def load_album_art(self, url):
         if not url:
             GLib.idle_add(self.set_default_image)
             return
-        
+
         if url.startswith('file://'):
-            import os
             path = url[7:]
             try:
                 if os.path.exists(path) and os.path.isfile(path):
@@ -203,8 +217,7 @@ class MusicWidget(Gtk.Window):
                 pass
             GLib.idle_add(self.set_default_image)
             return
-        
-        # Handle http/https URLs (once)
+
         try:
             with urllib.request.urlopen(url, timeout=5) as response:
                 data = response.read()
@@ -217,23 +230,9 @@ class MusicWidget(Gtk.Window):
         except Exception:
             GLib.idle_add(self.set_default_image)
 
-    # ---------------------------
-    # Metadata polling fallback
-    # ---------------------------
-    def poll_metadata(self):
-        if hasattr(self, 'player') and self.player:
-            try:
-                metadata_variant = self.player.get_property('metadata')
-                metadata = metadata_variant.unpack() if isinstance(metadata_variant, GLib.Variant) else metadata_variant
-                if metadata:
-                    self.on_metadata_change(self.player, metadata)
-            except Exception as e:
-                print(f"Poll error: {e}")
-        return True
-
-    # ---------------------------
-    # Window positioning with dynamic width and shift
-    # ---------------------------
+    # ------------------------------------------------------------------
+    #  Window positioning (flushed right, gap_y=35)
+    # ------------------------------------------------------------------
     def position_window(self, _widget):
         self.reposition()
 
@@ -245,18 +244,18 @@ class MusicWidget(Gtk.Window):
                 monitor = display.get_monitor(0)
             geometry = monitor.get_geometry()
             width, height = self.get_size()
-            
-            # Force a specific width for testing (temporary)
+
             self.set_size_request(290, -1)
-            width, height = self.get_size()  # get again after request
-            
-            # Calculate x to be flush right with no shift
+            width, height = self.get_size()   # get actual size after request
+
+            # Flush right, no horizontal gap
             x = geometry.x + geometry.width - width
             y = geometry.y + geometry.height - height - 35
-                     
+
             self.set_gravity(Gdk.Gravity.NORTH_EAST)
             self.move(x, y)
             self.get_display().flush()
+
 
 def main():
     Gtk.init(None)
