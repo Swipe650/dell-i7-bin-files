@@ -135,6 +135,7 @@ class MusicWidget(Gtk.Window):
             value.get_style_context().add_class("value")
 
         self.set_default_image()
+        self.current_art_url = None   # track last loaded art URL
 
         self.connect("realize", self.position_window)
 
@@ -161,38 +162,22 @@ class MusicWidget(Gtk.Window):
         title, artist, album, art_url = get_playerctl_metadata()
         track_id = f"{title}|{artist}|{album}"
 
+        # Update text if track changed
         if track_id != self.last_track:
             self.last_track = track_id
-            # Update text immediately
             self.title_value.set_text(title if title else "Unknown Title")
             self.artist_value.set_text(artist if artist else "Unknown Artist")
             self.album_value.set_text(album if album else "Unknown Album")
 
-            # Schedule retries for album art
-            def try_load_art(retry_count=0):
-                if retry_count >= 3:
-                    print("Failed to load album art after 3 attempts. Using default.")
-                    self.set_default_image()
-                    return
-                # Re-fetch the metadata to get the art_url
-                _, _, _, current_art_url = get_playerctl_metadata()
-                if current_art_url:
-                    print(f"Retry {retry_count+1}: Art URL found, loading...")
-                    threading.Thread(target=self.load_album_art,
-                                     args=(current_art_url,),
-                                     daemon=True).start()
-                else:
-                    print(f"Retry {retry_count+1}: Art URL not found, retrying...")
-                    GLib.timeout_add_seconds(1, lambda: try_load_art(retry_count + 1))
-
-            # Start the first attempt with the original art_url
+        # Update album art if the URL has changed (including becoming empty)
+        if art_url != self.current_art_url:
+            self.current_art_url = art_url
             if art_url:
-                threading.Thread(target=self.load_album_art,
-                                 args=(art_url,),
-                                 daemon=True).start()
+                # Load in background thread
+                threading.Thread(target=self.load_album_art, args=(art_url,), daemon=True).start()
             else:
-                print("Initial art_url missing. Starting fallback retry loop.")
-                GLib.timeout_add_seconds(1, try_load_art)
+                # No art URL – show default
+                self.set_default_image()
 
         return True
 
@@ -240,10 +225,9 @@ class MusicWidget(Gtk.Window):
             GLib.idle_add(self.set_default_image)
 
     # ------------------------------------------------------------------
-    #  Window positioning (no reposition needed – KWin rule handles it)
+    #  Window positioning (KWin rule handles it)
     # ------------------------------------------------------------------
     def position_window(self, _widget):
-        # The KWin rule forces the correct position; nothing to do here.
         pass
 
 
