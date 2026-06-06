@@ -34,8 +34,7 @@ def get_playerctl_metadata():
 
 class MusicWidget(Gtk.Window):
     def __init__(self):
-        Gtk.Window.__init__(self, title="Now Playing")# Force the window to be anchored at the bottom-right
-        self.set_gravity(Gdk.Gravity.SOUTH_EAST) 
+        Gtk.Window.__init__(self, title="Now Playing")
         self.set_decorated(False)
         self.set_keep_above(True)
         self.set_skip_taskbar_hint(True)
@@ -45,7 +44,7 @@ class MusicWidget(Gtk.Window):
 
         # Fixed size (the KWin rule uses these dimensions)
         self.set_default_size(290, 180)
-        self.set_size_request(290, -1)
+        self.set_size_request(290, 180)
 
         # Start hidden
         self.hide()
