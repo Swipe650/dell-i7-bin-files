@@ -2801,21 +2801,32 @@ document.getElementById('tagAlbumBtn').addEventListener('click', () => {
 document.getElementById('modalSaveBtn').addEventListener('click', saveGenre);
 document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
 
-// ========== SO & RYM buttons ==========
+// ========== SO, Today, RYM buttons ==========
 (function() {
     function addButtons() {
         const card = document.querySelector('.card');
         if (!card) return;
 
-        if (!document.getElementById('soButton')) {
+        // Create the container only once
+        if (!document.getElementById('topRightControls')) {
+            const container = document.createElement('div');
+            container.id = 'topRightControls';
+            Object.assign(container.style, {
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+                zIndex: '100'
+            });
+
+            // --- SO Button ---
             const soBtn = document.createElement('button');
             soBtn.id = 'soButton';
             soBtn.innerHTML = '<i data-feather="list"></i>';
             soBtn.title = 'Open Scrobble Overview';
             Object.assign(soBtn.style, {
-                position: 'absolute',
-                top: '10px',
-                right: '70px',
                 background: 'rgba(0,0,0,0.5)',
                 backdropFilter: 'blur(4px)',
                 border: 'none',
@@ -2825,25 +2836,33 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
                 cursor: 'pointer',
                 color: 'white',
                 fontFamily: 'inherit',
-                zIndex: '100',
                 transition: 'background 0.2s'
             });
             soBtn.addEventListener('mouseenter', () => soBtn.style.background = 'rgba(0,0,0,0.7)');
             soBtn.addEventListener('mouseleave', () => soBtn.style.background = 'rgba(0,0,0,0.5)');
-            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
-            card.appendChild(soBtn);
             soBtn.addEventListener('click', () => window.open('/scrobbles', '_blank'));
-        }
 
-        if (!document.getElementById('rymButton')) {
+            // --- Today badge ---
+            const todayBadge = document.createElement('span');
+            todayBadge.id = 'todayScrobblesBadge';
+            todayBadge.innerHTML = 'Today: ...';
+            Object.assign(todayBadge.style, {
+                background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(4px)',
+                borderRadius: '20px',
+                padding: '4px 10px',
+                fontSize: '0.7rem',
+                color: 'white',
+                fontFamily: 'inherit',
+                whiteSpace: 'nowrap'
+            });
+
+            // --- RYM Button ---
             const rymBtn = document.createElement('button');
             rymBtn.id = 'rymButton';
             rymBtn.innerHTML = '🎵 RYM';
             rymBtn.title = 'Search on RateYourMusic';
             Object.assign(rymBtn.style, {
-                position: 'absolute',
-                top: '10px',
-                right: '10px',
                 background: 'rgba(0,0,0,0.5)',
                 backdropFilter: 'blur(4px)',
                 border: 'none',
@@ -2853,13 +2872,10 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
                 cursor: 'pointer',
                 color: 'white',
                 fontFamily: 'inherit',
-                zIndex: '100',
                 transition: 'background 0.2s'
             });
             rymBtn.addEventListener('mouseenter', () => rymBtn.style.background = 'rgba(0,0,0,0.7)');
             rymBtn.addEventListener('mouseleave', () => rymBtn.style.background = 'rgba(0,0,0,0.5)');
-            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
-            card.appendChild(rymBtn);
             rymBtn.addEventListener('click', () => {
                 const artist = document.getElementById('artist').innerText;
                 const album = document.getElementById('album').innerText;
@@ -2867,9 +2883,19 @@ document.getElementById('modalCancelBtn').addEventListener('click', closeModal);
                 const url = `https://rateyourmusic.com/search?searchtype=release&searchterm=${encodeURIComponent(artist)}%20-%20${encodeURIComponent(album)}`;
                 window.open(url, '_blank');
             });
-        }
 
-        feather.replace();
+            // Assemble the container
+            container.appendChild(soBtn);
+            container.appendChild(todayBadge);
+            container.appendChild(rymBtn);
+
+            // Ensure the card is positioned relatively so the container stays inside it
+            if (getComputedStyle(card).position !== 'relative') card.style.position = 'relative';
+            card.appendChild(container);
+
+            // Render Feather icons after all elements are in the DOM
+            feather.replace();
+        }
     }
 
     if (document.readyState === 'loading') {
@@ -2883,6 +2909,20 @@ fetchTotalScrobbles();
 setInterval(fetchTotalScrobbles, 60000);
 setupRetagButton();
 feather.replace();
+
+function fetchTodayScrobbles() {
+    fetch('/api/today_scrobbles')
+        .then(r => r.json())
+        .then(data => {
+            const badge = document.getElementById('todayScrobblesBadge');
+            if (badge) {
+                badge.innerText = `Today: ${data.count}`;
+            }
+        })
+        .catch(() => {});
+}
+fetchTodayScrobbles();
+setInterval(fetchTodayScrobbles, 60000);
 </script>
 </body>
 </html>
